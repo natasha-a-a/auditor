@@ -903,72 +903,51 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
         return avg_scores
     else:
         return INDUSTRY_BENCHMARKS.get(industry_keyword, INDUSTRY_BENCHMARKS["Other"])
+    
+    
 
 # --- Main App ---
 def main():
     st.set_page_config(
-    page_title="Paw a Peau Website Audit",
-    layout="wide",
-    page_icon="pawapeaufavicon.png" 
+        page_title="Paw a Peau Website Audit",
+        layout="wide",
+        page_icon="pawapeaufavicon.png"
     )
 
-# Center logo and title
+    # Center logo and title
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.image("pawapeaufavicon.png", width=64)
         st.title("Website Audit Tool")
         st.markdown("""
-    1. Enter **one** of the following:
-       - A **single website URL** (left)
-       - **OR** a **CSV file** for bulk audits (right)
-    2. Select an **industry** from the dropdown.
-    3. Click **Run Audit**.
-    The tool will analyze the site(s) and display a **scorecard**.
-    """)
+        1. Enter **one** of the following:
+           - A **single website URL** (left)
+           - **OR** a **CSV file** for bulk audits (right)
+        2. Select an **industry** from the dropdown.
+        3. Click **Run Audit**.
+        The tool will analyze the site(s) and display a **scorecard**.
+        """)
 
-# Input fields (side by side)
+    # Input fields (side by side)
     input_col1, input_col2 = st.columns(2)
     with input_col1:
-        website_url = st.text_input("Enter Website URL", key="url_input", label_visibility="collapsed")
+        website_url = st.text_input(
+            "Enter Website URL",
+            key="url_input",
+            placeholder="https://companywebsite.com"  # Shows "Enter Website URL" as placeholder
+        )
     with input_col2:
-        csv_file = st.file_uploader("Upload CSV for bulk audits", type=["csv"], key="csv_input", label_visibility="collapsed")
+        csv_file = st.file_uploader(
+            "Upload CSV for bulk audits",
+            type=["csv"],
+            key="csv_input"
+        )
 
-# Load caches
-    cache = load_cache()
-    whois_cache = load_whois_cache()
-
-# Validate input (must choose one, not both)
-    if st.button("🚀 Run Audit"):
-        if website_url and csv_file:
-                st.error("❌ **Error:** Please provide **either** a URL **or** a CSV file, not both.")
-                st.stop()  # Stop execution if both are provided
-        elif not website_url and not csv_file:
-                        st.error("❌ **Error:** Please provide a URL **or** a CSV file.")
-                        st.stop()
-        else:
-                        urls = []
-                        if website_url:
-                            normalized_url = normalize_url(website_url)
-                            if not validate_url(normalized_url):
-                                st.error("❌ Invalid URL. Please enter a valid website address.")
-                                st.stop()
-                            urls.append(normalized_url)
-                        if csv_file:
-                            try:
-                                df = pd.read_csv(csv_file)
-                                if "website_url" not in df.columns:
-                                    st.error("❌ CSV must contain a 'website_url' column.")
-                                    st.stop()
-                                urls = df["website_url"].apply(normalize_url).tolist()
-                                urls = list(set(urls))
-                                invalid_urls = [url for url in urls if not validate_url(url)]
-                                if invalid_urls:
-                                    st.error(f"❌ Invalid URLs detected: {', '.join(invalid_urls)}")
-                                    st.stop()
-                            except Exception as e:
-                                logger.error(f"Error reading CSV: {str(e)}")
-                                st.error(f"❌ Error reading CSV: {str(e)}")
-                                st.stop()
+    # Cache cleanup button
+    if st.button("🧹 Clean Up Old Cache Entries"):
+        deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
+        total_deleted = sum(deleted_counts.values())
+        st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
 
     # Industry dropdown
     industry_options = list(INDUSTRY_BENCHMARKS.keys())
@@ -979,41 +958,38 @@ def main():
         key="industry_dropdown"
     )
 
-    # Cache cleanup button
-    if st.button("🧹 Clean Up Old Cache Entries"):
-            deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
-            total_deleted = sum(deleted_counts.values())
-            st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
-
-    # Run audit 
+    # Validate input and run audit
     if st.button("🚀 Run Audit"):
-        if not website_url and not csv_file:
-            st.error("Please provide a URL or CSV file.")
-            return
-
-        urls = []
-        if website_url:
-            normalized_url = normalize_url(website_url)
-            if not validate_url(normalized_url):
-                st.error("Invalid URL. Please enter a valid website address.")
-                return
-            urls.append(normalized_url)
-        if csv_file:
-            try:
-                df = pd.read_csv(csv_file)
-                if "website_url" not in df.columns:
-                    st.error("CSV must contain a 'website_url' column.")
-                    return
-                urls = df["website_url"].apply(normalize_url).tolist()
-                urls = list(set(urls))
-                invalid_urls = [url for url in urls if not validate_url(url)]
-                if invalid_urls:
-                    st.error(f"Invalid URLs detected: {', '.join(invalid_urls)}")
-                    return
-            except Exception as e:
-                logger.error(f"Error reading CSV: {str(e)}")
-                st.error(f"Error reading CSV: {str(e)}")
-                return
+        if website_url and csv_file:
+            st.error("❌ **Error:** Please provide **either** a URL **or** a CSV file, not both.")
+            st.stop()
+        elif not website_url and not csv_file:
+            st.error("❌ **Error:** Please provide a URL **or** a CSV file.")
+            st.stop()
+        else:
+            urls = []
+            if website_url:
+                normalized_url = normalize_url(website_url)
+                if not validate_url(normalized_url):
+                    st.error("❌ Invalid URL. Please enter a valid website address.")
+                    st.stop()
+                urls.append(normalized_url)
+            if csv_file:
+                try:
+                    df = pd.read_csv(csv_file)
+                    if "website_url" not in df.columns:
+                        st.error("❌ CSV must contain a 'website_url' column.")
+                        st.stop()
+                    urls = df["website_url"].apply(normalize_url).tolist()
+                    urls = list(set(urls))
+                    invalid_urls = [url for url in urls if not validate_url(url)]
+                    if invalid_urls:
+                        st.error(f"❌ Invalid URLs detected: {', '.join(invalid_urls)}")
+                        st.stop()
+                except Exception as e:
+                    logger.error(f"Error reading CSV: {str(e)}")
+                    st.error(f"❌ Error reading CSV: {str(e)}")
+                    st.stop()
 
         # Process in batches
         total_urls = len(urls)
