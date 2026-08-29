@@ -1031,12 +1031,6 @@ def main():
                 st.stop()
 
             # Display scorecard
-            st.subheader("🏆 Human-Friendly Scorecard")
-            for result in all_results:
-                # ... (your existing scorecard display code)
-                pass
-
-            # Display scorecard
             st.subheader("🏆 Scorecard Results")
             for result in all_results:
                 st.markdown(f"### {result['url']}")
@@ -1100,7 +1094,7 @@ def main():
             st.markdown("#### 📈 Benchmark Comparison")
             benchmark_data = {
                 "Category": ["Technical", "Business Info", "Functional", "SEO", "Budget", "Dead End"],
-                "Your Score": [
+                "Analyzed Website Score": [
                     result["technical"]["score"],
                     result["business"]["score"],
                     result["functional"]["score"],
@@ -1108,7 +1102,7 @@ def main():
                     result["budget"]["score"],
                     result["dead_end"]["score"]
                 ],
-                "Benchmark": [
+                "Industry Benchmark": [
                     result["benchmarks"].get("technical", 70),
                     result["benchmarks"].get("business", 70),
                     result["benchmarks"].get("functional", 70),
@@ -1117,7 +1111,29 @@ def main():
                     100
                 ]
             }
-            st.dataframe(pd.DataFrame(benchmark_data), hide_index=True)
+# Create HTML table with colored scores
+            html = """
+            <table style="width:100%; border-collapse: collapse;">
+                <tr style="background-color: #f0f2f6;">
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Category</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Your Score</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Benchmark</th>
+                </tr>
+            """
+            for i, category in enumerate(benchmark_data["Category"]):
+                your_score = benchmark_data["Analyzed Website Score"][i]
+                benchmark = benchmark_data["Industry Benchmark"][i]
+                color = "green" if your_score > benchmark else "red" if your_score < benchmark else "black"
+                html += f"""
+                <tr style="border: 1px solid #ddd;">
+                    <td style="padding: 8px; border: 1px solid #ddd;">{category}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd; color: {color}; font-weight: bold;">{your_score}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{benchmark}</td>
+                </tr>
+                """
+            html += "</table>"
+
+            st.markdown(html, unsafe_allow_html=True)
 
             # Source of benchmarks
             competitor_count = len([
@@ -1125,7 +1141,7 @@ def main():
                 if data.get("industry_keyword") == industry_keyword
             ])
             if competitor_count > 0:
-                st.success(f"✅ Benchmarks based on **{competitor_count} competitors** in your industry.")
+                st.success(f"✅ Benchmarks based on **{competitor_count} competitors** in selected industry.")
             else:
                 st.info("ℹ️ Benchmarks based on **industry standards** (no competitors crawled yet).")
 
