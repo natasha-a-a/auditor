@@ -1,6 +1,3 @@
-Here is the **full corrected `dashboard.py`** with all fixes applied:
-
-```python
 import streamlit as st
 import pandas as pd
 import json
