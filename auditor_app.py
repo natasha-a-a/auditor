@@ -914,7 +914,7 @@ def main():
         page_icon="pawapeaufavicon.png"
     )
 
-    # Center logo and title
+    # --- HEADER (Logo + Title) ---
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.image("pawapeaufavicon.png", width=64)
@@ -928,38 +928,46 @@ def main():
         The tool will analyze the site(s) and display a **scorecard**.
         """)
 
-    # Input fields (side by side)
-    input_col1, input_col2 = st.columns(2)
-    with input_col1:
+    # --- MAIN FORM (Side-by-Side) ---
+    form_col1, form_col2 = st.columns(2)
+
+    # Left column: URL + Industry
+    with form_col1:
         website_url = st.text_input(
             "Enter Website URL",
             key="url_input",
-            placeholder="https://companywebsite.com"  # Shows "Enter Website URL" as placeholder
+            placeholder="https://example.com"
         )
-    with input_col2:
+        industry_options = list(INDUSTRY_BENCHMARKS.keys())
+        industry_keyword = st.selectbox(
+            "Select Industry",
+            industry_options,
+            index=len(industry_options)-1,
+            key="industry_dropdown"
+        )
+
+    # Right column: CSV + Run Audit Button
+    with form_col2:
         csv_file = st.file_uploader(
             "Upload CSV for bulk audits",
             type=["csv"],
             key="csv_input"
         )
+        run_audit_clicked = st.button("🚀 Run Audit")
 
-    # Cache cleanup button
-    if st.button("🧹 Clean Up Old Cache Entries"):
-        deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
-        total_deleted = sum(deleted_counts.values())
-        st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
+    # --- SEPARATOR ---
+    st.markdown("---")
 
-    # Industry dropdown
-    industry_options = list(INDUSTRY_BENCHMARKS.keys())
-    industry_keyword = st.selectbox(
-        "Select Industry",
-        industry_options,
-        index=len(industry_options)-1,
-        key="industry_dropdown"
-    )
+    # --- CACHE CLEANUP (Bottom Section) ---
+    cache_col1, cache_col2, cache_col3 = st.columns([1, 2, 1])
+    with cache_col2:
+        if st.button("🧹 Clean Up Old Cache Entries"):
+            deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
+            total_deleted = sum(deleted_counts.values())
+            st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
 
-    # Validate input and run audit
-    if st.button("🚀 Run Audit"):
+    # --- AUDIT LOGIC (Triggered by Run Audit Button) ---
+    if run_audit_clicked:
         if website_url and csv_file:
             st.error("❌ **Error:** Please provide **either** a URL **or** a CSV file, not both.")
             st.stop()
