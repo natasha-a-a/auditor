@@ -6,6 +6,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import plotly.express as px
 import os
+import csv
+csv.field_size_limit(100000000)  # Increase to 10MB (or higher if needed)
 
 # --- Constants ---
 BASE_DIR = Path.cwd()  # Use current directory (same as auditor app)

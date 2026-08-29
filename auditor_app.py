@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from firecrawl import FirecrawlApp
 import whois
 import csv
+csv.field_size_limit(100000000)  # Increase to 10MB (or higher if needed)
 import os
 
 # --- Constants ---
