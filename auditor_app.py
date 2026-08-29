@@ -1116,8 +1116,8 @@ def main():
 
             # Apply conditional formatting
             def highlight_score(s):
-                return ['background-color: #d4f7c5' if s[0] > s[1] else
-                        'background-color: #f7c5c5' if s[0] < s[1] else
+                return ['background-color: #055913' if s[0] > s[1] else
+                        'background-color: #EB1212' if s[0] < s[1] else
                         '' for s in zip(s, benchmark_df["Industry Benchmark"])]
 
             styled_df = benchmark_df.style.apply(highlight_score, subset=["Analyzed Website Score"])
