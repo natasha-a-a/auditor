@@ -1,3 +1,6 @@
+Here is the **full corrected `dashboard.py`** with all fixes applied:
+
+```python
 import streamlit as st
 import pandas as pd
 import json
@@ -16,9 +19,10 @@ WHOIS_DB_FILE = WHOIS_CACHE_DIR / "whois_cache.db"
 for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
 
-# Initialize databases (if tables don't exist)
+# --- Database Initialization ---
 def init_db():
-    for db_file, table in [(DB_FILE, "audits"), (WHOIS_DB_FILE, "whois")]:
+    """Initialize SQLite databases if they don't exist."""
+    for db_file in [DB_FILE, WHOIS_DB_FILE]:
         if not db_file.exists():
             conn = sqlite3.connect(str(db_file))
             cursor = conn.cursor()
@@ -43,7 +47,8 @@ def init_db():
             conn.commit()
             conn.close()
 
-init_db()  # Ensure tables exist
+# Initialize databases
+init_db()
 
 # --- Database Helper Functions ---
 def load_from_db(db_file, table, key=None):
@@ -63,21 +68,22 @@ def load_from_db(db_file, table, key=None):
                 cursor.execute("SELECT domain, data FROM audits")
                 return {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
     except sqlite3.OperationalError as e:
-        st.warning(f"⚠️ Database error: {str(e)}. Run the auditor app first.")
+        st.warning(f"⚠️ Database error: {str(e)}. Run the auditor app first to create data.")
         return {} if table == "audits" else None
     finally:
         conn.close()
 
-
 def load_cache():
-    """Load audit cache from SQLite (matches auditor app)."""
+    """Load audit cache from SQLite."""
     return load_from_db(DB_FILE, "audits") or {}
 
 def filter_recent_entries(cache, days=7):
+    """Filter cache entries from the last N days."""
     cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     return {k: v for k, v in cache.items() if v.get("audit_date", "") >= cutoff_date}
 
 def get_last_n_entries(cache, n=10):
+    """Get the last N entries from the cache."""
     sorted_entries = sorted(cache.items(), key=lambda x: x[1].get("audit_date", ""), reverse=True)
     return dict(sorted_entries[:n])
 
@@ -197,18 +203,7 @@ def generate_painpoint_csv(cache):
             "Dead End": data["dead_end"]["score"]
         }
         worst_category = min(scores, key=scores.get)
-        if worst_category == "Technical":
-            pain_points["Technical Issues"].append(data["url"])
-        elif worst_category == "Business Info":
-            pain_points["Business Info Gaps"].append(data["url"])
-        elif worst_category == "Functional":
-            pain_points["Functional Gaps"].append(data["url"])
-        elif worst_category == "SEO":
-            pain_points["SEO Weaknesses"].append(data["url"])
-        elif worst_category == "Budget":
-            pain_points["Budget Constraints"].append(data["url"])
-        elif worst_category == "Dead End":
-            pain_points["Dead End Risks"].append(data["url"])
+        pain_points[worst_category + " Issues" if worst_category != "Dead End" else "Dead End Risks"].append(data["url"])
 
     # Convert to DataFrame
     painpoint_data = []
@@ -236,8 +231,8 @@ def main():
     # Load cache from SQLite
     cache = load_cache()
     if not cache:
-        st.warning("⚠️ No audit data found. Run the auditor app first.")
-        return
+        st.warning("⚠️ No audit data found. Run the auditor app first to generate data.")
+        st.stop()
 
     # --- Benchmarks by Industry ---
     st.subheader("📈 Industry Benchmarks")
