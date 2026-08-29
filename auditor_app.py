@@ -914,8 +914,8 @@ def main():
 # Center logo and title
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-    st.image("pawapeaufavicon.png", width=64)
-    st.title("Paw a Peau Website Audit Tool")  # Text below logo
+        st.image("pawapeaufavicon.png", width=64)
+        st.title("Paw a Peau Website Audit Tool")  # Text below logo
 
     st.markdown("""
     **Instructions:**
