@@ -1,19 +1,18 @@
 import streamlit as st
 import pandas as pd
 import json
-import sqlite3
+import csv
 from pathlib import Path
 from datetime import datetime, timedelta
 import plotly.express as px
 import os
 
-# 1. Define paths FIRST
-BASE_DIR = Path("/mount/src") if os.path.exists("/mount/src") else Path.cwd()
+# --- Constants ---
+BASE_DIR = Path.cwd()  # Use current directory (same as auditor app)
 CACHE_DIR = BASE_DIR / "audit_cache"
-DB_FILE = CACHE_DIR / "audit_cache.db"
-CACHE_DIR.mkdir(exist_ok=True)
 WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
-WHOIS_DB_FILE = WHOIS_CACHE_DIR / "whois_cache.db"
+AUDIT_CSV = CACHE_DIR / "audits.csv"
+WHOIS_CSV = WHOIS_CACHE_DIR / "whois.csv"
 CACHE_CLEANUP_DAYS = 90
 BATCH_SIZE = 10
 WHOIS_RETRIES = 2
@@ -22,63 +21,45 @@ WHOIS_RETRIES = 2
 for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
 
-# --- Database Initialization ---
-def init_db():
-    """Initialize SQLite databases if they don't exist."""
-    for db_file in [DB_FILE, WHOIS_DB_FILE]:
-        if not db_file.exists():
-            conn = sqlite3.connect(str(db_file))
-            cursor = conn.cursor()
-            if db_file == DB_FILE:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS audits (
-                        domain TEXT PRIMARY KEY,
-                        data TEXT,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-            elif db_file == WHOIS_DB_FILE:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS whois (
-                        domain TEXT PRIMARY KEY,
-                        expiration_date TEXT,
-                        expiring_soon BOOLEAN,
-                        days_until_expiry INTEGER,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-            conn.commit()
-            conn.close()
+# --- CSV Helper Functions (Same as auditor app) ---
+def save_to_csv(file_path, data):
+    """Save dictionary data to CSV."""
+    file_path.parent.mkdir(exist_ok=True)
+    mode = 'w' if not file_path.exists() else 'a'
+    with open(file_path, mode, newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=["domain", "data", "timestamp"])
+        if mode == 'w':
+            writer.writeheader()
+        for key, value in data.items():
+            writer.writerow({
+                "domain": key,
+                "data": json.dumps(value),
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
 
-# Initialize databases
-init_db()
-
-# --- Database Helper Functions ---
-def load_from_db(db_file, table, key=None):
-    """Load data from SQLite database."""
-    if not db_file.exists():
-        return {} if table == "audits" else None
-    conn = sqlite3.connect(str(db_file))
-    cursor = conn.cursor()
-    try:
-        if key:
-            if table == "audits":
-                cursor.execute("SELECT data FROM audits WHERE domain = ?", (key,))
-                result = cursor.fetchone()
-                return json.loads(result[0]) if result else None
-        else:
-            if table == "audits":
-                cursor.execute("SELECT domain, data FROM audits")
-                return {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
-    except sqlite3.OperationalError as e:
-        st.warning(f"⚠️ Database error: {str(e)}. Run the auditor app first to create data.")
-        return {} if table == "audits" else None
-    finally:
-        conn.close()
+def load_from_csv(file_path):
+    """Load CSV data into a dictionary."""
+    if not file_path.exists():
+        return {}
+    with open(file_path, mode='r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        return {row["domain"]: json.loads(row["data"]) for row in reader}
 
 def load_cache():
-    """Load audit cache from SQLite."""
-    return load_from_db(DB_FILE, "audits") or {}
+    """Load audit cache from CSV."""
+    return load_from_csv(AUDIT_CSV)
+
+def save_cache(cache):
+    """Save audit cache to CSV."""
+    save_to_csv(AUDIT_CSV, cache)
+
+def load_whois_cache():
+    """Load WHOIS cache from CSV."""
+    return load_from_csv(WHOIS_CSV)
+
+def save_whois_cache(cache):
+    """Save WHOIS cache to CSV."""
+    save_to_csv(WHOIS_CSV, cache)
 
 def filter_recent_entries(cache, days=7):
     """Filter cache entries from the last N days."""
@@ -90,6 +71,7 @@ def get_last_n_entries(cache, n=10):
     sorted_entries = sorted(cache.items(), key=lambda x: x[1].get("audit_date", ""), reverse=True)
     return dict(sorted_entries[:n])
 
+# --- CSV Generation Functions ---
 def generate_full_csv(cache):
     """Generate a CSV of all audit data in the cache."""
     csv_data = []
@@ -98,7 +80,6 @@ def generate_full_csv(cache):
         audit_date = data["audit_date"]
         benchmarks = data["benchmarks"]
 
-        # Technical checks
         for check_name, check_data in data["technical"]["checks"].items():
             csv_data.append({
                 "page_url": url, "audit_date": audit_date, "audit_type": "Technical",
@@ -107,10 +88,9 @@ def generate_full_csv(cache):
                 "why_it_matters": "Critical for security" if check_data["status"] == "Critical" else "Improves robustness",
                 "recommendation": "Fix immediately" if check_data["status"] == "Critical" else "Review and improve",
                 "priority": check_data["status"], "score": data["technical"]["score"],
-                "benchmark": benchmarks.get("technical", 70), "vs_benchmark": "Above" if data["technical"]["score"] > benchmarks.get("technical", 70) else "Below"
+                "benchmark": benchmarks.get("technical", 70),
+                "vs_benchmark": "Above" if data["technical"]["score"] > benchmarks.get("technical", 70) else "Below"
             })
-
-        # Business Info checks
         for check_name, check_data in data["business"]["checks"].items():
             csv_data.append({
                 "page_url": url, "audit_date": audit_date, "audit_type": "Business Info",
@@ -119,10 +99,9 @@ def generate_full_csv(cache):
                 "why_it_matters": "Critical for trust" if check_data["status"] == "Critical" else "Improves credibility",
                 "recommendation": "Add missing information" if check_data["status"] != "Good" else "None",
                 "priority": check_data["status"], "score": data["business"]["score"],
-                "benchmark": benchmarks.get("business", 70), "vs_benchmark": "Above" if data["business"]["score"] > benchmarks.get("business", 70) else "Below"
+                "benchmark": benchmarks.get("business", 70),
+                "vs_benchmark": "Above" if data["business"]["score"] > benchmarks.get("business", 70) else "Below"
             })
-
-        # Functional checks
         for check_name, check_data in data["functional"]["checks"].items():
             csv_data.append({
                 "page_url": url, "audit_date": audit_date, "audit_type": "Functional",
@@ -131,10 +110,9 @@ def generate_full_csv(cache):
                 "why_it_matters": "Critical for conversions" if check_data["status"] == "Critical" else "Improves user experience",
                 "recommendation": "Implement missing functionality" if check_data["status"] != "Good" else "None",
                 "priority": check_data["status"], "score": data["functional"]["score"],
-                "benchmark": benchmarks.get("functional", 70), "vs_benchmark": "Above" if data["functional"]["score"] > benchmarks.get("functional", 70) else "Below"
+                "benchmark": benchmarks.get("functional", 70),
+                "vs_benchmark": "Above" if data["functional"]["score"] > benchmarks.get("functional", 70) else "Below"
             })
-
-        # SEO checks
         for check_name, check_data in data["seo"]["checks"].items():
             csv_data.append({
                 "page_url": url, "audit_date": audit_date, "audit_type": "SEO",
@@ -143,10 +121,9 @@ def generate_full_csv(cache):
                 "why_it_matters": "Critical for visibility" if check_data["status"] == "Critical" else "Improves rankings",
                 "recommendation": "Optimize for search engines" if check_data["status"] != "Good" else "None",
                 "priority": check_data["status"], "score": data["seo"]["score"],
-                "benchmark": benchmarks.get("seo", 70), "vs_benchmark": "Above" if data["seo"]["score"] > benchmarks.get("seo", 70) else "Below"
+                "benchmark": benchmarks.get("seo", 70),
+                "vs_benchmark": "Above" if data["seo"]["score"] > benchmarks.get("seo", 70) else "Below"
             })
-
-        # Budget Red Flags checks
         for check_name, check_data in data["budget"]["checks"].items():
             csv_data.append({
                 "page_url": url, "audit_date": audit_date, "audit_type": "Budget Red Flags",
@@ -155,10 +132,9 @@ def generate_full_csv(cache):
                 "why_it_matters": "Indicates low digital investment" if check_data["status"] != "Good" else "No concerns",
                 "recommendation": "Invest in digital presence" if check_data["status"] != "Good" else "None",
                 "priority": check_data["status"], "score": data["budget"]["score"],
-                "benchmark": benchmarks.get("budget", 70), "vs_benchmark": "Above" if data["budget"]["score"] > benchmarks.get("budget", 70) else "Below"
+                "benchmark": benchmarks.get("budget", 70),
+                "vs_benchmark": "Above" if data["budget"]["score"] > benchmarks.get("budget", 70) else "Below"
             })
-
-        # Dead End checks
         for check_name, check_data in data["dead_end"]["checks"].items():
             csv_data.append({
                 "page_url": url, "audit_date": audit_date, "audit_type": "Dead End Detection",
@@ -167,10 +143,9 @@ def generate_full_csv(cache):
                 "why_it_matters": "Critical for business continuity" if check_data["status"] == "Critical" else "No immediate risk",
                 "recommendation": "Renew domain immediately" if check_data["status"] == "Critical" else "Monitor domain status",
                 "priority": check_data["status"], "score": data["dead_end"]["score"],
-                "benchmark": 100, "vs_benchmark": "Above" if data["dead_end"]["score"] == 100 else "Below"
+                "benchmark": 100,
+                "vs_benchmark": "Above" if data["dead_end"]["score"] == 100 else "Below"
             })
-
-        # Growth Signals
         growth_signals = data["growth"]["growth_signals"]
         if growth_signals:
             csv_data.append({
@@ -182,7 +157,6 @@ def generate_full_csv(cache):
                 "priority": "Good", "score": 100,
                 "benchmark": "N/A", "vs_benchmark": "N/A"
             })
-
     return pd.DataFrame(csv_data)
 
 def generate_painpoint_csv(cache):
@@ -195,7 +169,6 @@ def generate_painpoint_csv(cache):
         "Budget Constraints": [],
         "Dead End Risks": []
     }
-
     for domain, data in cache.items():
         scores = {
             "Technical": data["technical"]["score"],
@@ -206,17 +179,22 @@ def generate_painpoint_csv(cache):
             "Dead End": data["dead_end"]["score"]
         }
         worst_category = min(scores, key=scores.get)
-        pain_points[worst_category + " Issues" if worst_category != "Dead End" else "Dead End Risks"].append(data["url"])
-
-    # Convert to DataFrame
+        if worst_category == "Technical":
+            pain_points["Technical Issues"].append(data["url"])
+        elif worst_category == "Business Info":
+            pain_points["Business Info Gaps"].append(data["url"])
+        elif worst_category == "Functional":
+            pain_points["Functional Gaps"].append(data["url"])
+        elif worst_category == "SEO":
+            pain_points["SEO Weaknesses"].append(data["url"])
+        elif worst_category == "Budget":
+            pain_points["Budget Constraints"].append(data["url"])
+        elif worst_category == "Dead End":
+            pain_points["Dead End Risks"].append(data["url"])
     painpoint_data = []
     for category, urls in pain_points.items():
         for url in urls:
-            painpoint_data.append({
-                "Pain Point": category,
-                "URL": url,
-                "Count": len(urls)
-            })
+            painpoint_data.append({"Pain Point": category, "URL": url, "Count": len(urls)})
     return pd.DataFrame(painpoint_data)
 
 # --- Main Dashboard App ---
@@ -231,7 +209,7 @@ def main():
     - **Download Reports**: Get detailed CSV files for analysis.
     """)
 
-    # Load cache from SQLite
+    # Load cache from CSV
     cache = load_cache()
     if not cache:
         st.warning("⚠️ No audit data found. Run the auditor app first to generate data.")
@@ -252,12 +230,9 @@ def main():
             "Dead End": data["dead_end"]["score"],
             "Growth Signals": len(data["growth"]["growth_signals"])
         })
-
     if industry_data:
         industry_df = pd.DataFrame(industry_data)
         avg_by_industry = industry_df.groupby("Industry").mean().reset_index()
-
-        # Plot average scores by industry
         fig = px.bar(avg_by_industry, x="Industry", y=["Technical", "Business Info", "Functional", "SEO", "Budget"],
                      title="Average Scores by Industry", barmode="group")
         st.plotly_chart(fig, use_container_width=True)
@@ -279,7 +254,6 @@ def main():
                 "Budget": data["budget"]["score"],
                 "Dead End": data["dead_end"]["score"]
             })
-
         trend_df = pd.DataFrame(trend_data)
         if not trend_df.empty:
             fig = px.line(trend_df, x="Date", y=["Technical", "Business Info", "Functional", "SEO", "Budget"],
@@ -305,14 +279,11 @@ def main():
                 "Dead End": data["dead_end"]["score"],
                 "Growth Signals": ", ".join(data["growth"]["growth_signals"]) if data["growth"]["growth_signals"] else "None"
             })
-
         last_10_df = pd.DataFrame(last_10_data)
         st.dataframe(last_10_df, use_container_width=True)
 
     # --- Downloadable Reports ---
     st.subheader("📥 Download Reports")
-
-    # Full Audit CSV
     full_csv_df = generate_full_csv(cache)
     if not full_csv_df.empty:
         csv_full = full_csv_df.to_csv(index=False)
@@ -322,8 +293,6 @@ def main():
             file_name=f"full_audit_report_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
             mime="text/csv"
         )
-
-    # Pain Point Shortlists CSV
     painpoint_csv_df = generate_painpoint_csv(cache)
     if not painpoint_csv_df.empty:
         csv_painpoint = painpoint_csv_df.to_csv(index=False)
@@ -344,7 +313,6 @@ def main():
         "Budget Constraints": [],
         "Dead End Risks": []
     }
-
     for domain, data in cache.items():
         scores = {
             "Technical": data["technical"]["score"],
@@ -367,7 +335,6 @@ def main():
             pain_points["Budget Constraints"].append(data["url"])
         elif worst_category == "Dead End":
             pain_points["Dead End Risks"].append(data["url"])
-
     for category, urls in pain_points.items():
         if urls:
             with st.expander(f"{category} ({len(urls)} websites)"):
