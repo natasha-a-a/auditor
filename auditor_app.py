@@ -540,8 +540,8 @@ def technical_audit(crawl_result):
         issues.append("Missing viewport meta tag for mobile responsiveness")
 
     # Flash elements
-    flash_elements = soup.find_all("object", type=lambda x: x and "flash" in x.lower()) if x else []
-    flash_elements += soup.find_all("embed", type=lambda x: x and "flash" in x.lower()) if x else []
+    flash_elements = soup.find_all("object", type=lambda x: x and "flash" in x.lower())
+    flash_elements += soup.find_all("embed", type=lambda x: x and "flash" in x.lower())
     flash_status = "Good" if not flash_elements else "Critical"
     checks["flash_elements"] = {"status": flash_status, "issue": "Outdated Flash elements detected"}
     if flash_elements:

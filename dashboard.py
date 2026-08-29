@@ -7,26 +7,48 @@ from datetime import datetime, timedelta
 import plotly.express as px
 
 # --- Constants ---
-CACHE_DIR = Path("audit_cache")
-DB_FILE = CACHE_DIR / "audit_cache.db"  # Updated to use SQLite
-WHOIS_DB_FILE = Path("whois_cache") / "whois_cache.db"
-TECH_STACK_DB_FILE = Path("tech_stack_cache") / "tech_stack_cache.db"
+from pathlib import Path
+import os
+
+# Use absolute path to ensure both apps access the same database
+BASE_DIR = Path(__file__).parent.parent  # Goes up one level from /auditor/ to /mount/src/
+CACHE_DIR = BASE_DIR / "audit_cache"
+WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
+TECH_STACK_CACHE_DIR = BASE_DIR / "tech_stack_cache"
+
+# Database files
+DB_FILE = CACHE_DIR / "audit_cache.db"
+WHOIS_DB_FILE = WHOIS_CACHE_DIR / "whois_cache.db"
+TECH_STACK_DB_FILE = TECH_STACK_CACHE_DIR / "tech_stack_cache.db"
+
+# Ensure directories exist
+for directory in [CACHE_DIR, WHOIS_CACHE_DIR, TECH_STACK_CACHE_DIR]:
+    directory.mkdir(exist_ok=True)
 
 # --- Database Helper Functions ---
 def load_from_db(db_file, table, key=None):
     """Load data from SQLite database."""
-    conn = sqlite3.connect(db_file)
+    # Ensure the database file exists
+    if not db_file.exists():
+        return {} if table == "audits" else None
+
+    conn = sqlite3.connect(str(db_file))  # Convert Path to string for SQLite
     cursor = conn.cursor()
-    if key:
-        if table == "audits":
-            cursor.execute("SELECT data FROM audits WHERE domain = ?", (key,))
-            result = cursor.fetchone()
-            return json.loads(result[0]) if result else None
-    else:
-        if table == "audits":
-            cursor.execute("SELECT domain, data FROM audits")
-            return {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
-    conn.close()
+    try:
+        if key:
+            if table == "audits":
+                cursor.execute("SELECT data FROM audits WHERE domain = ?", (key,))
+                result = cursor.fetchone()
+                return json.loads(result[0]) if result else None
+        else:
+            if table == "audits":
+                cursor.execute("SELECT domain, data FROM audits")
+                return {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
+    except sqlite3.OperationalError as e:
+        st.error(f"⚠️ Database error: {str(e)}. The database may not exist yet. Run the auditor app first.")
+        return {} if table == "audits" else None
+    finally:
+        conn.close()
 
 def load_cache():
     """Load audit cache from SQLite."""
