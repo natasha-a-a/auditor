@@ -1,6 +1,3 @@
-Here’s the **complete, corrected `auditor_app.py`** with Wappalyzer removed and all database fixes applied:
-
-```python
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
