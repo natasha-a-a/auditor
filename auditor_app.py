@@ -928,9 +928,12 @@ def main():
     cache = load_cache()
     whois_cache = load_whois_cache()
 
+    with col1:
     # Website input
-    website_url = st.text_input("Enter Website URL", key="url_input")
-    csv_file = st.file_uploader("Upload CSV for bulk audits", type=["csv"])
+        website_url = st.text_input("Enter Website URL", key="url_input")
+
+    with col3:
+        csv_file = st.file_uploader("Upload CSV for bulk audits", type=["csv"])
 
     # Industry dropdown
     industry_options = list(INDUSTRY_BENCHMARKS.keys())
