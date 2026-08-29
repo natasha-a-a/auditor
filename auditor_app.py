@@ -13,6 +13,30 @@ from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from firecrawl import FirecrawlApp
 import whois
+import os
+st.write(f"📁 Current working directory: {os.getcwd()}")
+st.write(f"📁 DB_FILE path: {DB_FILE.absolute()}")
+st.write(f"📁 DB_FILE exists: {DB_FILE.exists()}")
+if DB_FILE.exists():
+    st.write(f"📁 DB_FILE size: {DB_FILE.stat().st_size} bytes")
+    import os
+from pathlib import Path
+
+# CONSTANTS
+# # For Streamlit Cloud, use /mount/src/ as the base directory
+BASE_DIR = Path("/mount/src") if os.path.exists("/mount/src") else Path.cwd()
+CACHE_DIR = BASE_DIR / "audit_cache"
+WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
+DB_FILE = CACHE_DIR / "audit_cache.db"
+WHOIS_DB_FILE = WHOIS_CACHE_DIR / "whois_cache.db"
+CACHE_CLEANUP_DAYS = 90
+BATCH_SIZE = 10
+WHOIS_RETRIES = 2
+
+# Ensure directories exist
+for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
+    directory.mkdir(exist_ok=True)
+
 
 # --- Setup Logging ---
 logging.basicConfig(
@@ -24,17 +48,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-# --- Constants ---
-CACHE_DIR = Path("audit_cache")
-WHOIS_CACHE_DIR = Path("whois_cache")
-CACHE_CLEANUP_DAYS = 90
-BATCH_SIZE = 10
-WHOIS_RETRIES = 2
-
-# Ensure directories exist
-for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
-    directory.mkdir(exist_ok=True)
 
 # SQLite database files
 DB_FILE = CACHE_DIR / "audit_cache.db"

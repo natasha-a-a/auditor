@@ -5,10 +5,19 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
 import plotly.express as px
+import os
+st.write(f"📁 Current working directory: {os.getcwd()}")
+st.write(f"📁 DB_FILE path: {DB_FILE.absolute()}")
+st.write(f"📁 DB_FILE exists: {DB_FILE.exists()}")
+if DB_FILE.exists():
+    st.write(f"📁 DB_FILE size: {DB_FILE.stat().st_size} bytes")
+from pathlib import Path
 
-# --- Constants ---
-CACHE_DIR = Path("audit_cache")
-WHOIS_CACHE_DIR = Path("whois_cache")
+# CONSTANTS
+# # For Streamlit Cloud, use /mount/src/ as the base directory
+BASE_DIR = Path("/mount/src") if os.path.exists("/mount/src") else Path.cwd()
+CACHE_DIR = BASE_DIR / "audit_cache"
+WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
 DB_FILE = CACHE_DIR / "audit_cache.db"
 WHOIS_DB_FILE = WHOIS_CACHE_DIR / "whois_cache.db"
 
