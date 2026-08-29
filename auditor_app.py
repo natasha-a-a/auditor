@@ -885,13 +885,7 @@ def main():
     # --- SEPARATOR ---
     st.markdown("---")
 
-    # --- CACHE CLEANUP (Bottom Section) ---
-    cache_col1, cache_col2, cache_col3 = st.columns([1, 2, 1])
-    with cache_col2:
-        if st.button("🧹 Clean Up Old Cache Entries"):
-            deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
-            total_deleted = sum(deleted_counts.values())
-            st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
+    
 
     # --- AUDIT LOGIC (Triggered by Run Audit Button) ---
     if 'run_audit_clicked' in locals() and run_audit_clicked:
@@ -1052,6 +1046,13 @@ def main():
                 st.markdown("---")
 
             st.info("💡 **For detailed CSV reports and pain point shortlists, use the Dashboard App.")
+# --- CACHE CLEANUP (Bottom Section) ---
+    cache_col1, cache_col2, cache_col3 = st.columns([1, 2, 1])
+    with cache_col2:
+        if st.button("🧹 Clean Up Old Cache Entries"):
+            deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
+            total_deleted = sum(deleted_counts.values())
+            st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
             st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
 
 if __name__ == "__main__":
