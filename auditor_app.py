@@ -71,14 +71,21 @@ init_db()
 
 # Score deductions
 SCORE_DEDUCTIONS = {
+    # Technical
     "ssl_invalid": 30, "slow_load_time": 10, "mobile_unfriendly": 10,
     "flash_elements": 15, "broken_links": 5, "outdated_plugins": 10,
+    "missing_structured_data": 5,  # <-- ADD THIS LINE
+    # Business Info
     "no_products": 20, "no_company_info": 15, "no_certifications": 15,
     "no_testimonials": 10, "outdated_copyright": 5,
+    # Functional
     "no_contact_form": 10, "no_rfq": 15, "no_ecommerce": 10, "no_blog": 5,
-    "no_analytics": 10, "no_local_seo": 10,
+    # SEO/Visibility
+    "no_analytics": 10, "low_domain_authority": 15, "no_local_seo": 10,
+    # Budget Red Flags
     "no_physical_address": 10, "no_employee_photos": 5, "no_online_payments": 10,
     "generic_email": 5, "diy_website": 10, "no_updates": 10,
+    # Dead End
     "domain_expiring": 25, "parked_domain": 30,
 }
 
@@ -905,7 +912,7 @@ def main():
     )
 
     # Website input
-    website_url = st.text_input("Enter Website URL (e.g., https://amarell-thermometer.de/)", key="url_input")
+    website_url = st.text_input("Enter Website URL", key="url_input")
     csv_file = st.file_uploader("Upload CSV for bulk audits", type=["csv"])
 
     if st.button("🚀 Run Audit"):
