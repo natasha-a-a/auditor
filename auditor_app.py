@@ -3,7 +3,6 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import json
-import sqlite3
 import time
 import logging
 from pathlib import Path
@@ -21,13 +20,16 @@ CACHE_DIR = Path("audit_cache")
 WHOIS_CACHE_DIR = Path("whois_cache")
 AUDIT_CSV = CACHE_DIR / "audits.csv"
 WHOIS_CSV = WHOIS_CACHE_DIR / "whois.csv"
+CACHE_CLEANUP_DAYS = 90
+BATCH_SIZE = 10
+WHOIS_RETRIES = 2
 
 # Ensure directories exist
 for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
 
 # --- CSV Helper Functions ---
-def save_to_csv(file_path, data, key_field="domain"):
+def save_to_csv(file_path, data):
     """Save dictionary data to CSV."""
     file_path.parent.mkdir(exist_ok=True)
     mode = 'w' if not file_path.exists() else 'a'
@@ -38,7 +40,7 @@ def save_to_csv(file_path, data, key_field="domain"):
         for key, value in data.items():
             writer.writerow({
                 "domain": key,
-                "data": json.dumps(value),  # Store data as JSON string
+                "data": json.dumps(value),
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
 
@@ -66,51 +68,42 @@ def save_whois_cache(cache):
     """Save WHOIS cache to CSV."""
     save_to_csv(WHOIS_CSV, cache)
 
+def cleanup_old_cache_entries(days=90):
+    """Remove cache entries older than `days` days from CSV."""
+    cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cache = load_cache()
+    whois_cache = load_whois_cache()
+
+    # Filter recent entries
+    recent_cache = {
+        k: v for k, v in cache.items()
+        if v.get("audit_date", "") >= cutoff_date
+    }
+    recent_whois_cache = {
+        k: v for k, v in whois_cache.items()
+        if v.get("timestamp", "1970-01-01").split()[0] >= cutoff_date
+    }
+
+    # Save filtered data
+    save_cache(recent_cache)
+    save_whois_cache(recent_whois_cache)
+
+    return {"audits": len(cache) - len(recent_cache), "whois": len(whois_cache) - len(recent_whois_cache)}
+
 # Score deductions
 SCORE_DEDUCTIONS = {
-    # Technical
-    "ssl_invalid": 30,
-    "slow_load_time": 10,
-    "mobile_unfriendly": 10,
-    "flash_elements": 15,
-    "broken_links": 5,
-    "outdated_plugins": 10,
-    "missing_structured_data": 5,
-    "missing_security_headers": 10,  # <-- Missing key causing the error
-
-    # Business Info
-    "no_products": 20,
-    "no_company_info": 15,
-    "no_certifications": 15,
-    "no_testimonials": 10,
-    "outdated_copyright": 5,
-
-    # Functional
-    "no_contact_form": 10,
-    "no_rfq": 15,
-    "no_ecommerce": 10,
-    "no_blog": 5,
-
-    # SEO/Visibility
-    "no_analytics": 10,
-    "no_local_seo": 10,
-    "missing_meta_title": 10,      # <-- Used in seo_visibility_audit
-    "missing_meta_description": 10, # <-- Used in seo_visibility_audit
-    "missing_alt_text": 5,          # <-- Used in seo_visibility_audit
-    "deep_url_structure": 5,        # <-- Used in seo_visibility_audit
-    "few_internal_links": 5,       # <-- Used in seo_visibility_audit
-
-    # Budget Red Flags
-    "no_physical_address": 10,
-    "no_employee_photos": 5,
-    "no_online_payments": 10,
-    "generic_email": 5,
-    "diy_website": 10,
-    "no_updates": 10,
-
-    # Dead End
-    "domain_expiring": 25,
-    "parked_domain": 30,
+    "ssl_invalid": 30, "slow_load_time": 10, "mobile_unfriendly": 10,
+    "flash_elements": 15, "broken_links": 5, "outdated_plugins": 10,
+    "missing_structured_data": 5, "missing_security_headers": 10,
+    "no_products": 20, "no_company_info": 15, "no_certifications": 15,
+    "no_testimonials": 10, "outdated_copyright": 5,
+    "no_contact_form": 10, "no_rfq": 15, "no_ecommerce": 10, "no_blog": 5,
+    "no_analytics": 10, "no_local_seo": 10,
+    "missing_meta_title": 10, "missing_meta_description": 10, "missing_alt_text": 5,
+    "deep_url_structure": 5, "few_internal_links": 5,
+    "no_physical_address": 10, "no_employee_photos": 5, "no_online_payments": 10,
+    "generic_email": 5, "diy_website": 10, "no_updates": 10,
+    "domain_expiring": 25, "parked_domain": 30,
 }
 
 # Thresholds
@@ -154,80 +147,16 @@ COMPETITOR_LISTS = {
     "Fashion": ["https://www.zara.com", "https://www.hm.com", "https://www.gucci.com", "https://www.louisvuitton.com", "https://www.chanel.com"]
 }
 
-# --- Database Helper Functions ---
-def save_to_db(db_file, table, key, data):
-    """Save data to SQLite database."""
-    conn = sqlite3.connect(str(db_file))
-    cursor = conn.cursor()
-    if table == "audits":
-        cursor.execute(
-            "INSERT OR REPLACE INTO audits (domain, data, timestamp) VALUES (?, ?, CURRENT_TIMESTAMP)",
-            (key, json.dumps(data))
-        )
-    elif table == "whois":
-        cursor.execute(
-            "INSERT OR REPLACE INTO whois (domain, expiration_date, expiring_soon, days_until_expiry, timestamp) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
-            (key, data.get("expiration_date", ""), data.get("expiring_soon", False), data.get("days_until_expiry", 0))
-        )
-    conn.commit()
-    conn.close()
-
-def load_from_db(db_file, table, key=None):
-    """Load data from SQLite database."""
-    if not db_file.exists():
-        return {} if table == "audits" else None
-    conn = sqlite3.connect(str(db_file))
-    cursor = conn.cursor()
-    try:
-        if key:
-            if table == "audits":
-                cursor.execute("SELECT data FROM audits WHERE domain = ?", (key,))
-                result = cursor.fetchone()
-                return json.loads(result[0]) if result else None
-        else:
-            if table == "audits":
-                cursor.execute("SELECT domain, data FROM audits")
-                return {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
-    except sqlite3.OperationalError as e:
-        st.error(f"Database error: {str(e)}. Run the auditor app first to create the database.")
-        return {} if table == "audits" else None
-    finally:
-        conn.close()
-
-def load_cache():
-    """Load audit cache from SQLite."""
-    return load_from_db(DB_FILE, "audits") or {}
-
-def save_cache(cache):
-    """Save audit cache to SQLite."""
-    for domain, data in cache.items():
-        save_to_db(DB_FILE, "audits", domain, data)
-
-def load_whois_cache():
-    """Load WHOIS cache from SQLite."""
-    return load_from_db(WHOIS_DB_FILE, "whois") or {}
-
-def save_whois_cache(cache):
-    """Save WHOIS cache to SQLite."""
-    for domain, data in cache.items():
-        save_to_db(WHOIS_DB_FILE, "whois", domain, data)
-
-def cleanup_old_cache_entries(days=90):
-    """Remove cache entries older than `days` days."""
-    cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    deleted_counts = {}
-
-    for db_file, table in [(DB_FILE, "audits"), (WHOIS_DB_FILE, "whois")]:
-        conn = sqlite3.connect(str(db_file))
-        cursor = conn.cursor()
-        cursor.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff_date,))
-        deleted_counts[table] = cursor.rowcount
-        conn.commit()
-        conn.close()
-
-    total_deleted = sum(deleted_counts.values())
-    logger.info(f"Cleaned up {total_deleted} cache entries older than {days} days: {deleted_counts}")
-    return deleted_counts
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("auditor_app.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---
 def normalize_url(url):
@@ -330,7 +259,8 @@ def check_domain_expiration(url, whois_cache):
                 whois_cache[domain] = {
                     "expiration_date": expiration_date.isoformat(),
                     "expiring_soon": expiring_soon,
-                    "days_until_expiry": days_until_expiry
+                    "days_until_expiry": days_until_expiry,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
                 save_whois_cache(whois_cache)
                 return expiring_soon
@@ -339,7 +269,7 @@ def check_domain_expiration(url, whois_cache):
             logger.warning(f"WHOIS attempt {attempt + 1} failed for {domain}: {str(e)}")
             if attempt == WHOIS_RETRIES - 1:
                 logger.error(f"WHOIS lookup failed for {domain} after {WHOIS_RETRIES} attempts")
-                whois_cache[domain] = {"expiring_soon": False, "error": str(e)}
+                whois_cache[domain] = {"expiring_soon": False, "error": str(e), "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
                 save_whois_cache(whois_cache)
                 return False
             time.sleep(1)
@@ -512,6 +442,7 @@ def technical_audit(crawl_result):
     if missing_headers:
         score -= SCORE_DEDUCTIONS["missing_security_headers"]
         issues.append(f"Missing security headers: {', '.join(missing_headers)}")
+
     return {"score": max(0, score), "issues": issues, "checks": checks}
 
 def business_info_audit(crawl_result, url):
@@ -542,17 +473,17 @@ def business_info_audit(crawl_result, url):
         score -= SCORE_DEDUCTIONS["no_company_info"]
         issues.append("No company story, team, or history page detected")
 
-    # Certifications (ISO, REACH, RoHS, SDS)
+    # Certifications
     cert_keywords = ["iso 9001", "iso 14001", "reach", "rohs", "safety data sheet", "sds", "ce marking", "fda", "ul listed"]
     cert_content = soup.get_text().lower()
     has_certifications = any(keyword in cert_content for keyword in cert_keywords)
     cert_status = "Good" if has_certifications else "Needs improvement"
-    checks["certifications"] = {"status": cert_status, "issue": "No certifications (ISO, REACH, RoHS, SDS) detected"}
+    checks["certifications"] = {"status": cert_status, "issue": "No certifications detected"}
     if not has_certifications:
         score -= SCORE_DEDUCTIONS["no_certifications"]
         issues.append("No certifications (ISO, REACH, RoHS, SDS) detected")
 
-    # Case studies/testimonials
+    # Testimonials
     testimonial_keywords = ["testimonial", "case study", "client success", "customer story"]
     has_testimonials = any(keyword in cert_content for keyword in testimonial_keywords)
     testimonial_status = "Good" if has_testimonials else "Needs improvement"
@@ -676,7 +607,7 @@ def seo_visibility_audit(crawl_result, url):
         score -= SCORE_DEDUCTIONS["few_internal_links"]
         issues.append(f"Few internal links found ({len(internal_links)})")
 
-    # Local SEO (Google My Business)
+    # Local SEO
     gmb_script = soup.find("script", src=lambda x: x and "google.com/maps" in x)
     gmb_link = soup.find("a", href=lambda x: x and "google.com/maps" in x)
     has_gmb = bool(gmb_script or gmb_link)
@@ -686,7 +617,7 @@ def seo_visibility_audit(crawl_result, url):
         score -= SCORE_DEDUCTIONS["no_local_seo"]
         issues.append("No Google My Business integration detected")
 
-    # Analytics tools
+    # Analytics
     ga_script = soup.find("script", string=re.compile("UA-\d+|G-\w+|gtag\('config'"))
     has_analytics = bool(ga_script)
     analytics_status = "Good" if has_analytics else "Needs improvement"
@@ -900,8 +831,6 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
         return avg_scores
     else:
         return INDUSTRY_BENCHMARKS.get(industry_keyword, INDUSTRY_BENCHMARKS["Other"])
-    
-    
 
 # --- Main App ---
 def main():
@@ -950,7 +879,6 @@ def main():
             type=["csv"],
             key="csv_input"
         )
-        # Define the button and capture its state
         run_audit_clicked = st.button("🚀 Run Audit")
 
     # --- SEPARATOR ---
@@ -965,7 +893,6 @@ def main():
             st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
 
     # --- AUDIT LOGIC (Triggered by Run Audit Button) ---
-    # Check if the button was clicked
     if 'run_audit_clicked' in locals() and run_audit_clicked:
         # Load caches
         cache = load_cache()
@@ -1028,113 +955,103 @@ def main():
                 st.stop()
 
             # Display scorecard
-            st.subheader("🏆 Scorecard Results")
             for result in all_results:
                 st.markdown(f"### {result['url']}")
                 st.markdown(f"**Industry:** {result['industry_keyword']} | **Date:** {result['audit_date']}")
-                pass
-        
-            # Overall scores
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("🔧 Technical", f"{result['technical']['score']}/100",
-                         delta=f"{result['technical']['score'] - result['benchmarks'].get('technical', 70):+.0f}")
-                if result["technical"]["issues"]:
-                    with st.expander("⚠️ Technical Issues"):
-                        for issue in result["technical"]["issues"]:
-                            st.write(f"- {issue}")
-            with col2:
-                st.metric("🏢 Business Info", f"{result['business']['score']}/100",
-                         delta=f"{result['business']['score'] - result['benchmarks'].get('business', 70):+.0f}")
-                if result["business"]["issues"]:
-                    with st.expander("⚠️ Business Info Issues"):
-                        for issue in result["business"]["issues"]:
-                            st.write(f"- {issue}")
-            with col3:
-                st.metric("🛠️ Functional", f"{result['functional']['score']}/100",
-                         delta=f"{result['functional']['score'] - result['benchmarks'].get('functional', 70):+.0f}")
-                if result["functional"]["issues"]:
-                    with st.expander("⚠️ Functional Gaps"):
-                        for issue in result["functional"]["issues"]:
-                            st.write(f"- {issue}")
 
-            col4, col5, col6 = st.columns(3)
-            with col4:
-                st.metric("🔍 SEO", f"{result['seo']['score']}/100",
-                         delta=f"{result['seo']['score'] - result['benchmarks'].get('seo', 70):+.0f}")
-                if result["seo"]["issues"]:
-                    with st.expander("⚠️ SEO Issues"):
-                        for issue in result["seo"]["issues"]:
-                            st.write(f"- {issue}")
-            with col5:
-                st.metric("💰 Budget", f"{result['budget']['score']}/100",
-                         delta=f"{result['budget']['score'] - result['benchmarks'].get('budget', 70):+.0f}")
-                if result["budget"]["issues"]:
-                    with st.expander("⚠️ Budget Red Flags"):
-                        for issue in result["budget"]["issues"]:
-                            st.write(f"- {issue}")
-            with col6:
-                st.metric("🚨 Dead End", f"{result['dead_end']['score']}/100",
-                         delta=f"{result['dead_end']['score'] - 100:+.0f}")
-                if result["dead_end"]["issues"]:
-                    with st.expander("⚠️ Dead End Risks"):
-                        for issue in result["dead_end"]["issues"]:
-                            st.write(f"- {issue}")
+                # Overall scores
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("🔧 Technical", f"{result['technical']['score']}/100",
+                             delta=f"{result['technical']['score'] - result['benchmarks'].get('technical', 70):+.0f}")
+                    if result["technical"]["issues"]:
+                        with st.expander("⚠️ Technical Issues"):
+                            for issue in result["technical"]["issues"]:
+                                st.write(f"- {issue}")
+                with col2:
+                    st.metric("🏢 Business Info", f"{result['business']['score']}/100",
+                             delta=f"{result['business']['score'] - result['benchmarks'].get('business', 70):+.0f}")
+                    if result["business"]["issues"]:
+                        with st.expander("⚠️ Business Info Issues"):
+                            for issue in result["business"]["issues"]:
+                                st.write(f"- {issue}")
+                with col3:
+                    st.metric("🛠️ Functional", f"{result['functional']['score']}/100",
+                             delta=f"{result['functional']['score'] - result['benchmarks'].get('functional', 70):+.0f}")
+                    if result["functional"]["issues"]:
+                        with st.expander("⚠️ Functional Gaps"):
+                            for issue in result["functional"]["issues"]:
+                                st.write(f"- {issue}")
 
-            # Growth signals
-            if result["growth"]["growth_signals"]:
-                st.success("✅ **Growth Signals Detected:** " + ", ".join(result["growth"]["growth_signals"]))
-            else:
-                st.warning("⚠️ **No Growth Signals Detected**")
+                col4, col5, col6 = st.columns(3)
+                with col4:
+                    st.metric("🔍 SEO", f"{result['seo']['score']}/100",
+                             delta=f"{result['seo']['score'] - result['benchmarks'].get('seo', 70):+.0f}")
+                    if result["seo"]["issues"]:
+                        with st.expander("⚠️ SEO Issues"):
+                            for issue in result["seo"]["issues"]:
+                                st.write(f"- {issue}")
+                with col5:
+                    st.metric("💰 Budget", f"{result['budget']['score']}/100",
+                             delta=f"{result['budget']['score'] - result['benchmarks'].get('budget', 70):+.0f}")
+                    if result["budget"]["issues"]:
+                        with st.expander("⚠️ Budget Red Flags"):
+                            for issue in result["budget"]["issues"]:
+                                st.write(f"- {issue}")
+                with col6:
+                    st.metric("🚨 Dead End", f"{result['dead_end']['score']}/100",
+                             delta=f"{result['dead_end']['score'] - 100:+.0f}")
+                    if result["dead_end"]["issues"]:
+                        with st.expander("⚠️ Dead End Risks"):
+                            for issue in result["dead_end"]["issues"]:
+                                st.write(f"- {issue}")
 
-            # Benchmark comparison
-            st.markdown("#### 📈 Benchmark Comparison")
-            benchmark_data = {
-                "Category": ["Technical", "Business Info", "Functional", "SEO", "Budget", "Dead End"],
-                "Analyzed Website Score": [
-                    result["technical"]["score"],
-                    result["business"]["score"],
-                    result["functional"]["score"],
-                    result["seo"]["score"],
-                    result["budget"]["score"],
-                    result["dead_end"]["score"]
-                ],
-                "Industry Benchmark": [
-                    result["benchmarks"].get("technical", 70),
-                    result["benchmarks"].get("business", 70),
-                    result["benchmarks"].get("functional", 70),
-                    result["benchmarks"].get("seo", 70),
-                    result["benchmarks"].get("budget", 70),
-                    100
-                ]
-            }
-            # Create DataFrame
-            benchmark_df = pd.DataFrame(benchmark_data)
+                # Growth signals
+                if result["growth"]["growth_signals"]:
+                    st.success("✅ **Growth Signals Detected:** " + ", ".join(result["growth"]["growth_signals"]))
+                else:
+                    st.warning("⚠️ **No Growth Signals Detected**")
 
-            # Apply conditional formatting
-            def highlight_score(s):
-                return ['background-color: #055913' if s[0] > s[1] else
-                        'background-color: #EB1212' if s[0] < s[1] else
-                        '' for s in zip(s, benchmark_df["Industry Benchmark"])]
+                # Benchmark comparison
+                st.markdown("#### 📈 Benchmark Comparison")
+                benchmark_data = {
+                    "Category": ["Technical", "Business Info", "Functional", "SEO", "Budget", "Dead End"],
+                    "Analyzed Website Score": [
+                        result["technical"]["score"],
+                        result["business"]["score"],
+                        result["functional"]["score"],
+                        result["seo"]["score"],
+                        result["budget"]["score"],
+                        result["dead_end"]["score"]
+                    ],
+                    "Industry Benchmark": [
+                        result["benchmarks"].get("technical", 70),
+                        result["benchmarks"].get("business", 70),
+                        result["benchmarks"].get("functional", 70),
+                        result["benchmarks"].get("seo", 70),
+                        result["benchmarks"].get("budget", 70),
+                        100
+                    ]
+                }
+                benchmark_df = pd.DataFrame(benchmark_data)
+                def highlight_score(s):
+                    return ['background-color: #055913' if s[0] > s[1] else
+                            'background-color: #EB1212' if s[0] < s[1] else
+                            '' for s in zip(s, benchmark_df["Industry Benchmark"])]
+                styled_df = benchmark_df.style.apply(highlight_score, subset=["Analyzed Website Score"])
+                st.dataframe(styled_df, hide_index=True)
 
-            styled_df = benchmark_df.style.apply(highlight_score, subset=["Analyzed Website Score"])
-            st.dataframe(styled_df, hide_index=True)
+                # Benchmark source
+                competitor_count = len([domain for domain, data in cache.items() if data.get("industry_keyword") == industry_keyword])
+                if competitor_count > 0:
+                    st.success(f"✅ Benchmarks based on **{competitor_count} competitors** in selected industry.")
+                else:
+                    st.info("ℹ️ Benchmarks based on **industry standards** (no competitors crawled yet).")
 
-            # Source of benchmarks
-            competitor_count = len([
-                domain for domain, data in cache.items()
-                if data.get("industry_keyword") == industry_keyword
-            ])
-            if competitor_count > 0:
-                st.success(f"✅ Benchmarks based on **{competitor_count} competitors** in selected industry.")
-            else:
-                st.info("ℹ️ Benchmarks based on **industry standards** (no competitors crawled yet).")
+                st.markdown("---")
 
-            st.markdown("---")
-            st.info("💡 **For detailed CSV reports and pain point shortlists, use the Dashboard App.**")
-# User feedback
-    st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
-
+            st.info("💡 **For detailed CSV reports and pain point shortlists, use the Dashboard App.")
+            st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
 
 if __name__ == "__main__":
     main()
