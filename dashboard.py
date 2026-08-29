@@ -7,32 +7,50 @@ from datetime import datetime, timedelta
 import plotly.express as px
 
 # --- Constants ---
-from pathlib import Path
-import os
-
-# Use absolute path to ensure both apps access the same database
-BASE_DIR = Path(__file__).parent.parent  # Goes up one level from /auditor/ to /mount/src/
-CACHE_DIR = BASE_DIR / "audit_cache"
-WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
-TECH_STACK_CACHE_DIR = BASE_DIR / "tech_stack_cache"
-
-# Database files
+CACHE_DIR = Path("audit_cache")
+WHOIS_CACHE_DIR = Path("whois_cache")
 DB_FILE = CACHE_DIR / "audit_cache.db"
 WHOIS_DB_FILE = WHOIS_CACHE_DIR / "whois_cache.db"
-TECH_STACK_DB_FILE = TECH_STACK_CACHE_DIR / "tech_stack_cache.db"
 
 # Ensure directories exist
-for directory in [CACHE_DIR, WHOIS_CACHE_DIR, TECH_STACK_CACHE_DIR]:
+for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
+
+# Initialize databases (if tables don't exist)
+def init_db():
+    for db_file, table in [(DB_FILE, "audits"), (WHOIS_DB_FILE, "whois")]:
+        if not db_file.exists():
+            conn = sqlite3.connect(str(db_file))
+            cursor = conn.cursor()
+            if db_file == DB_FILE:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS audits (
+                        domain TEXT PRIMARY KEY,
+                        data TEXT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+            elif db_file == WHOIS_DB_FILE:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS whois (
+                        domain TEXT PRIMARY KEY,
+                        expiration_date TEXT,
+                        expiring_soon BOOLEAN,
+                        days_until_expiry INTEGER,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+            conn.commit()
+            conn.close()
+
+init_db()  # Ensure tables exist
 
 # --- Database Helper Functions ---
 def load_from_db(db_file, table, key=None):
     """Load data from SQLite database."""
-    # Ensure the database file exists
     if not db_file.exists():
         return {} if table == "audits" else None
-
-    conn = sqlite3.connect(str(db_file))  # Convert Path to string for SQLite
+    conn = sqlite3.connect(str(db_file))
     cursor = conn.cursor()
     try:
         if key:
@@ -45,13 +63,14 @@ def load_from_db(db_file, table, key=None):
                 cursor.execute("SELECT domain, data FROM audits")
                 return {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
     except sqlite3.OperationalError as e:
-        st.error(f"⚠️ Database error: {str(e)}. The database may not exist yet. Run the auditor app first.")
+        st.warning(f"⚠️ Database error: {str(e)}. Run the auditor app first.")
         return {} if table == "audits" else None
     finally:
         conn.close()
 
+
 def load_cache():
-    """Load audit cache from SQLite."""
+    """Load audit cache from SQLite (matches auditor app)."""
     return load_from_db(DB_FILE, "audits") or {}
 
 def filter_recent_entries(cache, days=7):
