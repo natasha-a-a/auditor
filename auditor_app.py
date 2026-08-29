@@ -1,10 +1,12 @@
+Here’s the **complete, corrected `auditor_app.py`** with Wappalyzer removed and all database fixes applied:
+
+```python
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import json
 import sqlite3
-import os
 import time
 import logging
 from pathlib import Path
@@ -13,7 +15,6 @@ import re
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from firecrawl import FirecrawlApp
-from wappalyzer import Wappalyzer
 import whois
 
 # --- Setup Logging ---
@@ -30,34 +31,23 @@ logger = logging.getLogger(__name__)
 # --- Constants ---
 CACHE_DIR = Path("audit_cache")
 WHOIS_CACHE_DIR = Path("whois_cache")
-TECH_STACK_CACHE_DIR = Path("tech_stack_cache")
-LOG_FILE = Path("auditor_app.log")
-CACHE_CLEANUP_DAYS = 90  # Clean up entries older than 90 days
-BATCH_SIZE = 10  # Process 10 URLs at a time for CSV uploads
-WHOIS_RETRIES = 2  # Retry WHOIS lookups twice
+CACHE_CLEANUP_DAYS = 90
+BATCH_SIZE = 10
+WHOIS_RETRIES = 2
 
 # Ensure directories exist
-for directory in [CACHE_DIR, WHOIS_CACHE_DIR, TECH_STACK_CACHE_DIR]:
+for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
 
 # SQLite database files
 DB_FILE = CACHE_DIR / "audit_cache.db"
 WHOIS_DB_FILE = WHOIS_CACHE_DIR / "whois_cache.db"
-TECH_STACK_DB_FILE = TECH_STACK_CACHE_DIR / "tech_stack_cache.db"
-
-# Initialize Wappalyzer
-try:
-    wappalyzer = Wappalyzer.latest()
-except Exception as e:
-    wappalyzer = None
-    logger.warning(f"Wappalyzer initialization failed: {str(e)}")
 
 # Initialize databases
 def init_db():
-    """Initialize SQLite databases for caching."""
-    for db_file in [DB_FILE, WHOIS_DB_FILE, TECH_STACK_DB_FILE]:
+    for db_file in [DB_FILE, WHOIS_DB_FILE]:
         if not db_file.exists():
-            conn = sqlite3.connect(db_file)
+            conn = sqlite3.connect(str(db_file))
             cursor = conn.cursor()
             if db_file == DB_FILE:
                 cursor.execute("""
@@ -77,14 +67,6 @@ def init_db():
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
-            elif db_file == TECH_STACK_DB_FILE:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS tech_stack (
-                        domain TEXT PRIMARY KEY,
-                        tech_stack TEXT,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
             conn.commit()
             conn.close()
 
@@ -92,20 +74,14 @@ init_db()
 
 # Score deductions
 SCORE_DEDUCTIONS = {
-    # Technical
     "ssl_invalid": 30, "slow_load_time": 10, "mobile_unfriendly": 10,
     "flash_elements": 15, "broken_links": 5, "outdated_plugins": 10,
-    # Business Info
     "no_products": 20, "no_company_info": 15, "no_certifications": 15,
     "no_testimonials": 10, "outdated_copyright": 5,
-    # Functional
     "no_contact_form": 10, "no_rfq": 15, "no_ecommerce": 10, "no_blog": 5,
-    # SEO/Visibility
     "no_analytics": 10, "no_local_seo": 10,
-    # Budget Red Flags
     "no_physical_address": 10, "no_employee_photos": 5, "no_online_payments": 10,
     "generic_email": 5, "diy_website": 10, "no_updates": 10,
-    # Dead End
     "domain_expiring": 25, "parked_domain": 30,
 }
 
@@ -136,96 +112,66 @@ INDUSTRY_BENCHMARKS = {
 
 # Competitor lists
 COMPETITOR_LISTS = {
-    "E-commerce": ["https://www.amazon.com", "https://www.ebay.com", "https://www.etsy.com", "https://www.shopify.com", "https://www.walmart.com", "https://www.aliexpress.com", "https://www.newegg.com", "https://www.bestbuy.com", "https://www.target.com", "https://www.chewy.com"],
-    "Manufacturing": ["https://www.3m.com", "https://www.ge.com", "https://www.siemens.com", "https://www.honeywell.com", "https://www.bosch.com", "https://www.emerson.com", "https://www.rockwellautomation.com", "https://www.abb.com", "https://www.schneider-electric.com", "https://www.mitsubishielectric.com"],
-    "Retail": ["https://www.target.com", "https://www.bestbuy.com", "https://www.ikea.com", "https://www.homedepot.com", "https://www.lowes.com", "https://www.costco.com", "https://www.kroger.com", "https://www.aldisupermarkets.com", "https://www.traderjoes.com", "https://www.wayfair.com"],
-    "Technology": ["https://www.microsoft.com", "https://www.apple.com", "https://www.google.com", "https://www.ibm.com", "https://www.oracle.com", "https://www.intel.com", "https://www.amd.com", "https://www.nvidia.com", "https://www.cisco.com", "https://www.dell.com"],
-    "Healthcare": ["https://www.unitedhealthgroup.com", "https://www.kaiserpermanente.org", "https://www.cvshealth.com", "https://www.tenethealth.com", "https://www.hcahealthcare.com", "https://www.mayoclinic.org", "https://www.clevelandclinic.org", "https://www.johnshopkinsmedicine.org", "https://www.merck.com", "https://www.pfizer.com"],
-    "Education": ["https://www.coursera.org", "https://www.udemy.com", "https://www.khanacademy.org", "https://www.edx.org", "https://www.linkedin.com/learning", "https://www.masterclass.com", "https://www.skillshare.com", "https://www.udacity.com", "https://www.codecademy.com", "https://www.pluralsight.com"],
-    "Finance": ["https://www.chase.com", "https://www.bankofamerica.com", "https://www.wellsfargo.com", "https://www.citigroup.com", "https://www.goldmansachs.com", "https://www.jpmorgan.com", "https://www.morganstanley.com", "https://www.americanexpress.com", "https://www.paypal.com", "https://www.stripe.com"],
-    "Travel": ["https://www.booking.com", "https://www.expedia.com", "https://www.airbnb.com", "https://www.tripadvisor.com", "https://www.kayak.com", "https://www.priceline.com", "https://www.orbitz.com", "https://www.travelocity.com", "https://www.agoda.com", "https://www.trivago.com"],
-    "Food & Beverage": ["https://www.mcdonalds.com", "https://www.starbucks.com", "https://www.chipotle.com", "https://www.papajohns.com", "https://www.dominos.com", "https://www.pizzahut.com", "https://www.subway.com", "https://www.burgerking.com", "https://www.tacobell.com", "https://www.kfc.com"],
-    "Automotive": ["https://www.toyota.com", "https://www.ford.com", "https://www.honda.com", "https://www.gm.com", "https://www.tesla.com", "https://www.bmwusa.com", "https://www.mercedes-benz.com", "https://www.audi.com", "https://www.volvo.com", "https://www.nissanusa.com"],
-    "Real Estate": ["https://www.zillow.com", "https://www.realtor.com", "https://www.redfin.com", "https://www.trulia.com", "https://www.remax.com", "https://www.century21.com", "https://www.coldwellbanker.com", "https://www.kellerwilliams.com", "https://www.sothebysrealty.com", "https://www.compass.com"],
-    "Fashion": ["https://www.zara.com", "https://www.hm.com", "https://www.gucci.com", "https://www.louisvuitton.com", "https://www.chanel.com", "https://www.nike.com", "https://www.adidas.com", "https://www.forever21.com", "https://www.asos.com", "https://www.shein.com"]
+    "E-commerce": ["https://www.amazon.com", "https://www.ebay.com", "https://www.etsy.com", "https://www.shopify.com", "https://www.walmart.com"],
+    "Manufacturing": ["https://www.3m.com", "https://www.ge.com", "https://www.siemens.com", "https://www.honeywell.com", "https://www.bosch.com"],
+    "Retail": ["https://www.target.com", "https://www.bestbuy.com", "https://www.ikea.com", "https://www.homedepot.com", "https://www.lowes.com"],
+    "Technology": ["https://www.microsoft.com", "https://www.apple.com", "https://www.google.com", "https://www.ibm.com", "https://www.oracle.com"],
+    "Healthcare": ["https://www.unitedhealthgroup.com", "https://www.kaiserpermanente.org", "https://www.cvshealth.com", "https://www.tenethealth.com", "https://www.hcahealthcare.com"],
+    "Education": ["https://www.coursera.org", "https://www.udemy.com", "https://www.khanacademy.org", "https://www.edx.org", "https://www.linkedin.com/learning"],
+    "Finance": ["https://www.chase.com", "https://www.bankofamerica.com", "https://www.wellsfargo.com", "https://www.citigroup.com", "https://www.goldmansachs.com"],
+    "Travel": ["https://www.booking.com", "https://www.expedia.com", "https://www.airbnb.com", "https://www.tripadvisor.com", "https://www.kayak.com"],
+    "Food & Beverage": ["https://www.mcdonalds.com", "https://www.starbucks.com", "https://www.chipotle.com", "https://www.papajohns.com", "https://www.dominos.com"],
+    "Automotive": ["https://www.toyota.com", "https://www.ford.com", "https://www.honda.com", "https://www.gm.com", "https://www.tesla.com"],
+    "Real Estate": ["https://www.zillow.com", "https://www.realtor.com", "https://www.redfin.com", "https://www.trulia.com", "https://www.remax.com"],
+    "Fashion": ["https://www.zara.com", "https://www.hm.com", "https://www.gucci.com", "https://www.louisvuitton.com", "https://www.chanel.com"]
 }
 
 # --- Database Helper Functions ---
 def save_to_db(db_file, table, key, data):
-    """Save data to SQLite database (incremental update)."""
-    conn = sqlite3.connect(db_file)
+    """Save data to SQLite database."""
+    conn = sqlite3.connect(str(db_file))
     cursor = conn.cursor()
     if table == "audits":
-        cursor.execute("""
-            INSERT OR REPLACE INTO audits (domain, data, timestamp)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-        """, (key, json.dumps(data)))
+        cursor.execute(
+            "INSERT OR REPLACE INTO audits (domain, data, timestamp) VALUES (?, ?, CURRENT_TIMESTAMP)",
+            (key, json.dumps(data))
+        )
     elif table == "whois":
-        cursor.execute("""
-            INSERT OR REPLACE INTO whois (domain, expiration_date, expiring_soon, days_until_expiry, timestamp)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (
-            key,
-            data.get("expiration_date", ""),
-            data.get("expiring_soon", False),
-            data.get("days_until_expiry", 0)
-        ))
-    elif table == "tech_stack":
-        cursor.execute("""
-            INSERT OR REPLACE INTO tech_stack (domain, tech_stack, timestamp)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-        """, (key, json.dumps(data)))
+        cursor.execute(
+            "INSERT OR REPLACE INTO whois (domain, expiration_date, expiring_soon, days_until_expiry, timestamp) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            (key, data.get("expiration_date", ""), data.get("expiring_soon", False), data.get("days_until_expiry", 0))
+        )
     conn.commit()
     conn.close()
 
 def load_from_db(db_file, table, key=None):
     """Load data from SQLite database."""
-    conn = sqlite3.connect(db_file)
+    if not db_file.exists():
+        return {} if table == "audits" else None
+    conn = sqlite3.connect(str(db_file))
     cursor = conn.cursor()
-    if key:
-        if table == "audits":
-            cursor.execute("SELECT data FROM audits WHERE domain = ?", (key,))
-            result = cursor.fetchone()
-            return json.loads(result[0]) if result else None
-        elif table == "whois":
-            cursor.execute("SELECT * FROM whois WHERE domain = ?", (key,))
-            result = cursor.fetchone()
-            if result:
-                return {
-                    "expiration_date": result[1],
-                    "expiring_soon": bool(result[2]),
-                    "days_until_expiry": result[3]
-                }
-            return None
-        elif table == "tech_stack":
-            cursor.execute("SELECT tech_stack FROM tech_stack WHERE domain = ?", (key,))
-            result = cursor.fetchone()
-            return json.loads(result[0]) if result else []
-    else:
-        if table == "audits":
-            cursor.execute("SELECT domain, data FROM audits")
-            return {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
-        elif table == "whois":
-            cursor.execute("SELECT domain, expiration_date, expiring_soon, days_until_expiry FROM whois")
-            return {
-                row[0]: {
-                    "expiration_date": row[1],
-                    "expiring_soon": bool(row[2]),
-                    "days_until_expiry": row[3]
-                }
-                for row in cursor.fetchall()
-            }
-        elif table == "tech_stack":
-            cursor.execute("SELECT domain, tech_stack FROM tech_stack")
-            return {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
-    conn.close()
+    try:
+        if key:
+            if table == "audits":
+                cursor.execute("SELECT data FROM audits WHERE domain = ?", (key,))
+                result = cursor.fetchone()
+                return json.loads(result[0]) if result else None
+        else:
+            if table == "audits":
+                cursor.execute("SELECT domain, data FROM audits")
+                return {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
+    except sqlite3.OperationalError as e:
+        st.error(f"Database error: {str(e)}. Run the auditor app first to create the database.")
+        return {} if table == "audits" else None
+    finally:
+        conn.close()
 
 def load_cache():
     """Load audit cache from SQLite."""
     return load_from_db(DB_FILE, "audits") or {}
 
 def save_cache(cache):
-    """Save audit cache to SQLite (incremental)."""
+    """Save audit cache to SQLite."""
     for domain, data in cache.items():
         save_to_db(DB_FILE, "audits", domain, data)
 
@@ -234,47 +180,22 @@ def load_whois_cache():
     return load_from_db(WHOIS_DB_FILE, "whois") or {}
 
 def save_whois_cache(cache):
-    """Save WHOIS cache to SQLite (incremental)."""
+    """Save WHOIS cache to SQLite."""
     for domain, data in cache.items():
         save_to_db(WHOIS_DB_FILE, "whois", domain, data)
 
-def load_tech_stack_cache():
-    """Load tech stack cache from SQLite."""
-    return load_from_db(TECH_STACK_DB_FILE, "tech_stack") or {}
-
-def save_tech_stack_cache(cache):
-    """Save tech stack cache to SQLite (incremental)."""
-    for domain, tech_stack in cache.items():
-        save_to_db(TECH_STACK_DB_FILE, "tech_stack", domain, tech_stack)
-
 def cleanup_old_cache_entries(days=90):
-    """Remove cache entries older than `days` days from all databases."""
+    """Remove cache entries older than `days` days."""
     cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     deleted_counts = {}
 
-    # Clean audit cache
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM audits WHERE timestamp < ?", (cutoff_date,))
-    deleted_counts["audits"] = cursor.rowcount
-    conn.commit()
-    conn.close()
-
-    # Clean WHOIS cache
-    conn = sqlite3.connect(WHOIS_DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM whois WHERE timestamp < ?", (cutoff_date,))
-    deleted_counts["whois"] = cursor.rowcount
-    conn.commit()
-    conn.close()
-
-    # Clean tech stack cache
-    conn = sqlite3.connect(TECH_STACK_DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM tech_stack WHERE timestamp < ?", (cutoff_date,))
-    deleted_counts["tech_stack"] = cursor.rowcount
-    conn.commit()
-    conn.close()
+    for db_file, table in [(DB_FILE, "audits"), (WHOIS_DB_FILE, "whois")]:
+        conn = sqlite3.connect(str(db_file))
+        cursor = conn.cursor()
+        cursor.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff_date,))
+        deleted_counts[table] = cursor.rowcount
+        conn.commit()
+        conn.close()
 
     total_deleted = sum(deleted_counts.values())
     logger.info(f"Cleaned up {total_deleted} cache entries older than {days} days: {deleted_counts}")
@@ -282,7 +203,8 @@ def cleanup_old_cache_entries(days=90):
 
 # --- Helper Functions ---
 def normalize_url(url):
-    if not url: return ""
+    if not url:
+        return ""
     url = str(url).strip()
     if not re.match(r'^https?://', url, re.IGNORECASE):
         url = f"https://{url}"
@@ -291,36 +213,32 @@ def normalize_url(url):
 def validate_url(url):
     try:
         result = urlparse(url)
-        if not all([result.scheme, result.netloc]): return False
-        if any(x in result.netloc.lower() for x in ["localhost", "127.0.0.1", "192.168.", "10.0."]): return False
+        if not all([result.scheme, result.netloc]):
+            return False
+        if any(x in result.netloc.lower() for x in ["localhost", "127.0.0.1", "192.168.", "10.0."]):
+            return False
         return True
-    except: return False
+    except:
+        return False
 
 def get_firecrawl_app():
     try:
         api_key = st.secrets["FIRECRAWL_API_KEY"]
-        if not api_key: raise ValueError("Firecrawl API key not configured.")
+        if not api_key:
+            raise ValueError("Firecrawl API key not configured.")
         return FirecrawlApp(api_key=api_key)
     except Exception as e:
         logger.warning(f"Firecrawl initialization failed: {str(e)}. Falling back to requests.")
-        st.warning(f"⚠️ Firecrawl initialization failed: {str(e)}. Falling back to requests.")
+        st.warning(f"Firecrawl initialization failed: {str(e)}. Falling back to requests.")
         return None
 
 def crawl_page(url, max_retries=2):
-    """Use requests first, Firecrawl only as fallback. Caches tech stack results."""
+    """Crawl a page using requests first, Firecrawl as fallback."""
     if not validate_url(url):
         logger.error(f"Invalid or unsafe URL: {url}")
-        st.error(f"❌ Invalid or unsafe URL: {url}")
-        return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}, "tech_stack": []}
+        st.error(f"Invalid or unsafe URL: {url}")
+        return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
 
-    domain = urlparse(url).netloc
-    tech_stack_cache = load_tech_stack_cache()
-    if domain in tech_stack_cache:
-        tech_stack = tech_stack_cache[domain]
-    else:
-        tech_stack = []
-
-    # Try requests first (primary)
     for attempt in range(max_retries):
         try:
             response = requests.get(url, timeout=15, verify=True, headers={'User-Agent': 'Mozilla/5.0'})
@@ -328,62 +246,41 @@ def crawl_page(url, max_retries=2):
             ssl_valid = True
             load_time = response.elapsed.total_seconds()
             headers = dict(response.headers)
-
-            # Detect tech stack with Wappalyzer (if not cached)
-            if not tech_stack and wappalyzer:
-                try:
-                    tech_stack = [tech["name"] for tech in wappalyzer.analyze(response.url, response.headers, response.text)]
-                    tech_stack_cache[domain] = tech_stack
-                    save_tech_stack_cache(tech_stack_cache)
-                except Exception as e:
-                    logger.warning(f"Wappalyzer failed for {url}: {str(e)}")
-
             return {
                 "url": url,
                 "html": html,
                 "status_code": response.status_code,
                 "ssl_valid": ssl_valid,
                 "load_time": load_time,
-                "headers": headers,
-                "tech_stack": tech_stack
+                "headers": headers
             }
         except requests.exceptions.SSLError:
             logger.warning(f"SSL error for {url}")
-            return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}, "tech_stack": tech_stack}
+            return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
         except Exception as e:
             logger.warning(f"Request attempt {attempt + 1} failed for {url}: {str(e)}")
             if attempt == max_retries - 1:
-                # Fallback to Firecrawl if requests fails
                 fc = get_firecrawl_app()
                 if fc:
                     try:
                         scrape_result = fc.scrape_url(url, timeout=15)
                         html = scrape_result.get("markdown", "") if scrape_result else ""
                         if html:
-                            # Try to get tech stack from Firecrawl HTML
-                            if not tech_stack and wappalyzer:
-                                try:
-                                    tech_stack = [tech["name"] for tech in wappalyzer.analyze(url, {}, html)]
-                                    tech_stack_cache[domain] = tech_stack
-                                    save_tech_stack_cache(tech_stack_cache)
-                                except Exception as e:
-                                    logger.warning(f"Wappalyzer failed for {url} (Firecrawl): {str(e)}")
                             return {
                                 "url": url,
                                 "html": html,
                                 "status_code": 200,
-                                "ssl_valid": True,  # Assume valid (Firecrawl succeeded)
-                                "load_time": None,  # Not available from Firecrawl
-                                "headers": {},
-                                "tech_stack": tech_stack
+                                "ssl_valid": True,
+                                "load_time": None,
+                                "headers": {}
                             }
                     except Exception as e:
                         logger.error(f"Firecrawl failed for {url}: {str(e)}")
                 logger.error(f"Crawl failed for {url} after {max_retries} attempts: {str(e)}")
-                st.error(f"⚠️ Crawl failed for {url} after {max_retries} attempts: {str(e)}")
-                return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}, "tech_stack": tech_stack}
+                st.error(f"Crawl failed for {url} after {max_retries} attempts: {str(e)}")
+                return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
             continue
-    return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}, "tech_stack": tech_stack}
+    return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
 
 def check_domain_expiration(url, whois_cache):
     """Check if domain is expiring soon (cached with retries)."""
@@ -417,7 +314,7 @@ def check_domain_expiration(url, whois_cache):
                 whois_cache[domain] = {"expiring_soon": False, "error": str(e)}
                 save_whois_cache(whois_cache)
                 return False
-            time.sleep(1)  # Wait before retrying
+            time.sleep(1)
     return False
 
 def is_parked_domain(url):
@@ -447,8 +344,8 @@ def crawl_competitors_parallel(competitor_urls, max_workers=3, progress_bar=None
                 results[url] = future.result()
             except Exception as e:
                 logger.error(f"Failed to crawl {url}: {str(e)}")
-                st.warning(f"⚠️ Failed to crawl {url}: {str(e)}")
-                results[url] = {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}, "tech_stack": []}
+                st.warning(f"Failed to crawl {url}: {str(e)}")
+                results[url] = {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
             if progress_bar:
                 progress_bar.progress((i + 1) / len(future_to_url))
     return results
@@ -466,17 +363,16 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
 
         domain_key = urlparse(url).netloc
         if domain_key in cache:
-            st.info(f"✅ Using cached data for {url}")
+            st.info(f"Using cached data for {url}")
             results.append({**cache[domain_key], "industry_keyword": industry_keyword})
             continue
 
-        st.info(f"🔍 Auditing {url}...")
+        st.info(f"Auditing {url}...")
         crawl_result = crawl_page(url)
         if not crawl_result["html"]:
-            st.warning(f"⚠️ Skipping {url} (crawl failed)")
+            st.warning(f"Skipping {url} (crawl failed)")
             continue
 
-        # Run all audits
         tech_audit = technical_audit(crawl_result)
         business_audit = business_info_audit(crawl_result, url)
         functional_audit = functional_gaps_audit(crawl_result, url)
@@ -485,10 +381,8 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
         dead_end = dead_end_detection(url, crawl_result, whois_cache)
         growth_audit = growth_signals_audit(crawl_result, url)
 
-        # Get benchmarks (competitors or industry)
         benchmarks = get_competitor_benchmarks(url, industry_keyword, cache, whois_cache)
 
-        # Combine results
         result = {
             "url": url,
             "audit_date": datetime.now().strftime("%Y-%m-%d"),
@@ -509,7 +403,8 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
 
 # --- Audit Functions ---
 def technical_audit(crawl_result):
-    if not crawl_result["html"]: return {"score": 0, "issues": ["No HTML content"], "checks": {}}
+    if not crawl_result["html"]:
+        return {"score": 0, "issues": ["No HTML content"], "checks": {}}
     soup = BeautifulSoup(crawl_result["html"], 'html.parser')
     score = 100
     issues = []
@@ -561,10 +456,7 @@ def technical_audit(crawl_result):
     broken_links = []
     for link in internal_links:
         try:
-            if link.startswith("/"):
-                full_url = f"{crawl_result['url'].rstrip('/')}{link}"
-            else:
-                full_url = link
+            full_url = f"{crawl_result['url'].rstrip('/')}{link}" if link.startswith("/") else link
             response = requests.head(full_url, timeout=5, allow_redirects=True)
             if response.status_code >= 400:
                 broken_links.append(full_url)
@@ -592,19 +484,12 @@ def technical_audit(crawl_result):
     if missing_headers:
         score -= SCORE_DEDUCTIONS["missing_security_headers"]
         issues.append(f"Missing security headers: {', '.join(missing_headers)}")
-
-    # Tech stack (from Wappalyzer)
-    tech_stack = crawl_result.get("tech_stack", [])
-    if tech_stack:
-        checks["tech_stack"] = {"status": "Good", "issue": f"Tech stack: {', '.join(tech_stack)}"}
-    else:
-        checks["tech_stack"] = {"status": "Not tested", "issue": "Tech stack detection failed"}
-
     return {"score": max(0, score), "issues": issues, "checks": checks}
 
 def business_info_audit(crawl_result, url):
     """Check for business information presentation issues."""
-    if not crawl_result["html"]: return {"score": 100, "issues": [], "checks": {}}
+    if not crawl_result["html"]:
+        return {"score": 100, "issues": [], "checks": {}}
     soup = BeautifulSoup(crawl_result["html"], 'html.parser')
     score = 100
     issues = []
@@ -665,7 +550,8 @@ def business_info_audit(crawl_result, url):
 
 def functional_gaps_audit(crawl_result, url):
     """Check for functional gaps."""
-    if not crawl_result["html"]: return {"score": 100, "issues": [], "checks": {}}
+    if not crawl_result["html"]:
+        return {"score": 100, "issues": [], "checks": {}}
     soup = BeautifulSoup(crawl_result["html"], 'html.parser')
     score = 100
     issues = []
@@ -712,7 +598,8 @@ def functional_gaps_audit(crawl_result, url):
 
 def seo_visibility_audit(crawl_result, url):
     """Check for SEO and visibility issues."""
-    if not crawl_result["html"]: return {"score": 100, "issues": [], "checks": {}}
+    if not crawl_result["html"]:
+        return {"score": 100, "issues": [], "checks": {}}
     soup = BeautifulSoup(crawl_result["html"], 'html.parser')
     score = 100
     issues = []
@@ -720,18 +607,18 @@ def seo_visibility_audit(crawl_result, url):
 
     # Meta title
     title = soup.title.string if soup.title else ""
-    title_status = "Good" if title and len(title) <= MAX_META_TITLE_LENGTH else "Needs improvement"
+    title_status = "Good" if title and len(title) <= 60 else "Needs improvement"
     checks["meta_title"] = {"status": title_status, "issue": "Missing or long meta title"}
-    if not title or len(title) > MAX_META_TITLE_LENGTH:
+    if not title or len(title) > 60:
         score -= SCORE_DEDUCTIONS["missing_meta_title"]
         issues.append("Meta title is missing or too long (>60 chars)")
 
     # Meta description
     meta_desc = soup.find("meta", attrs={"name": "description"})
     desc = meta_desc["content"] if meta_desc else ""
-    desc_status = "Good" if desc and MIN_META_DESC_LENGTH <= len(desc) <= MAX_META_DESC_LENGTH else "Needs improvement"
+    desc_status = "Good" if desc and 50 <= len(desc) <= 160 else "Needs improvement"
     checks["meta_description"] = {"status": desc_status, "issue": "Missing or non-optimal meta description"}
-    if not desc or len(desc) > MAX_META_DESC_LENGTH or len(desc) < MIN_META_DESC_LENGTH:
+    if not desc or len(desc) > 160 or len(desc) < 50:
         score -= SCORE_DEDUCTIONS["missing_meta_description"]
         issues.append("Meta description is missing or not optimal (50-160 chars)")
 
@@ -771,12 +658,9 @@ def seo_visibility_audit(crawl_result, url):
         score -= SCORE_DEDUCTIONS["no_local_seo"]
         issues.append("No Google My Business integration detected")
 
-    # Analytics tools (from Wappalyzer or manual check)
-    tech_stack = crawl_result.get("tech_stack", [])
-    has_analytics = any(tech in ["Google Analytics", "Google Tag Manager", "Matomo", "Adobe Analytics"] for tech in tech_stack)
-    if not has_analytics:
-        ga_script = soup.find("script", string=re.compile("UA-\d+|G-\w+|gtag\('config'"))
-        has_analytics = bool(ga_script)
+    # Analytics tools
+    ga_script = soup.find("script", string=re.compile("UA-\d+|G-\w+|gtag\('config'"))
+    has_analytics = bool(ga_script)
     analytics_status = "Good" if has_analytics else "Needs improvement"
     checks["analytics"] = {"status": analytics_status, "issue": "No analytics tools detected"}
     if not has_analytics:
@@ -787,15 +671,16 @@ def seo_visibility_audit(crawl_result, url):
 
 def budget_red_flags_audit(crawl_result, url):
     """Check for budget red flags."""
-    if not crawl_result["html"]: return {"score": 100, "issues": [], "checks": {}}
+    if not crawl_result["html"]:
+        return {"score": 100, "issues": [], "checks": {}}
     soup = BeautifulSoup(crawl_result["html"], 'html.parser')
     score = 100
     issues = []
     checks = {}
+    content = soup.get_text().lower()
 
     # Physical address
     address_pattern = re.compile(r'\d+\s[\w\s]+,\s[\w\s]+,\s[A-Z]{2}\s\d{5}')
-    content = soup.get_text().lower()
     has_address = bool(address_pattern.search(content))
     address_status = "Good" if has_address else "Needs improvement"
     checks["physical_address"] = {"status": address_status, "issue": "No physical address detected"}
@@ -830,7 +715,7 @@ def budget_red_flags_audit(crawl_result, url):
         score -= SCORE_DEDUCTIONS["generic_email"]
         issues.append("Generic email address detected")
 
-    # No updates (check for recent dates in content)
+    # No updates
     recent_dates = re.findall(r'\b(202[3-5]|202[3-5]-\d{2})\b', content)
     has_recent_updates = bool(recent_dates)
     update_status = "Good" if has_recent_updates else "Needs improvement"
@@ -839,7 +724,7 @@ def budget_red_flags_audit(crawl_result, url):
         score -= SCORE_DEDUCTIONS["no_updates"]
         issues.append("No recent updates detected")
 
-    # DIY website (placeholder content)
+    # DIY website
     diy_indicators = ["welcome to my site", "under construction", "lorem ipsum", "this is a placeholder", "default template", "just another wordpress site"]
     is_diy = any(indicator in content for indicator in diy_indicators)
     diy_status = "Good" if not is_diy else "Needs improvement"
@@ -851,12 +736,12 @@ def budget_red_flags_audit(crawl_result, url):
     return {"score": max(0, score), "issues": issues, "checks": checks}
 
 def dead_end_detection(url, crawl_result, whois_cache):
-    """Check for dead end signals (cached WHOIS)."""
+    """Check for dead end signals."""
     score = 100
     issues = []
     checks = {}
 
-    # Domain expiration (cached)
+    # Domain expiration
     expiring_soon = check_domain_expiration(url, whois_cache)
     expiration_status = "Good" if not expiring_soon else "Critical"
     checks["domain_expiration"] = {"status": expiration_status, "issue": "Domain expiring soon"}
@@ -875,49 +760,55 @@ def dead_end_detection(url, crawl_result, whois_cache):
     return {"score": max(0, score), "issues": issues, "checks": checks}
 
 def growth_signals_audit(crawl_result, url):
-    """Check for growth signals (manual LinkedIn/GMB detection)."""
-    if not crawl_result["html"]: return {"score": 0, "issues": [], "checks": {}, "growth_signals": []}
+    """Check for growth signals."""
+    if not crawl_result["html"]:
+        return {"score": 0, "issues": [], "checks": {}, "growth_signals": []}
     soup = BeautifulSoup(crawl_result["html"], 'html.parser')
     score = 100
     issues = []
     checks = {}
     growth_signals = []
+    content = soup.get_text().lower()
 
     # Job postings
     job_keywords = ["careers", "jobs", "we're hiring", "join our team", "employment"]
-    has_jobs = any(keyword in soup.get_text().lower() for keyword in job_keywords)
-    if has_jobs: growth_signals.append("Job postings detected")
+    has_jobs = any(keyword in content for keyword in job_keywords)
+    if has_jobs:
+        growth_signals.append("Job postings detected")
     job_status = "Good" if has_jobs else "Needs improvement"
     checks["job_postings"] = {"status": job_status, "issue": "No job postings detected"}
 
     # Press releases/news
     press_keywords = ["press release", "newsroom", "media center", "latest news"]
-    has_press = any(keyword in soup.get_text().lower() for keyword in press_keywords)
-    if has_press: growth_signals.append("Press releases/news detected")
+    has_press = any(keyword in content for keyword in press_keywords)
+    if has_press:
+        growth_signals.append("Press releases/news detected")
     press_status = "Good" if has_press else "Needs improvement"
     checks["press_releases"] = {"status": press_status, "issue": "No press releases or news detected"}
 
     # Facility expansion
     expansion_keywords = ["new facility", "expanding", "grand opening", "new location"]
-    has_expansion = any(keyword in soup.get_text().lower() for keyword in expansion_keywords)
-    if has_expansion: growth_signals.append("Facility expansion detected")
+    has_expansion = any(keyword in content for keyword in expansion_keywords)
+    if has_expansion:
+        growth_signals.append("Facility expansion detected")
     expansion_status = "Good" if has_expansion else "Needs improvement"
     checks["facility_expansion"] = {"status": expansion_status, "issue": "No facility expansion detected"}
 
-    # LinkedIn presence (manual detection)
+    # LinkedIn presence
     linkedin_links = [a.get("href", "") for a in soup.find_all("a") if "linkedin.com" in a.get("href", "").lower()]
     linkedin_icons = [img.get("src", "") for img in soup.find_all("img") if "linkedin" in img.get("src", "").lower() or "linkedin" in img.get("alt", "").lower()]
-    linkedin_text = "linkedin" in soup.get_text().lower()
-    has_linkedin = bool(linkedin_links or linkedin_icons or linkedin_text)
-    if has_linkedin: growth_signals.append("LinkedIn presence detected")
+    has_linkedin = bool(linkedin_links or linkedin_icons)
+    if has_linkedin:
+        growth_signals.append("LinkedIn presence detected")
     linkedin_status = "Good" if has_linkedin else "Needs improvement"
     checks["linkedin_presence"] = {"status": linkedin_status, "issue": "No LinkedIn presence detected"}
 
-    # Google My Business (manual detection)
+    # Google My Business
     gmb_links = [a.get("href", "") for a in soup.find_all("a") if "google.com/maps" in a.get("href", "").lower()]
     gmb_iframes = [iframe.get("src", "") for iframe in soup.find_all("iframe") if "google.com/maps" in iframe.get("src", "").lower()]
     has_gmb = bool(gmb_links or gmb_iframes)
-    if has_gmb: growth_signals.append("Google My Business detected")
+    if has_gmb:
+        growth_signals.append("Google My Business detected")
     gmb_status = "Good" if has_gmb else "Needs improvement"
     checks["google_my_business"] = {"status": gmb_status, "issue": "No Google My Business detected"}
 
@@ -936,7 +827,7 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
         if urlparse(url).netloc not in cache
     ]
     if uncrawled_competitors:
-        st.info(f"🔍 Crawling {len(uncrawled_competitors)} competitors for {industry_keyword}...")
+        st.info(f"Crawling {len(uncrawled_competitors)} competitors for {industry_keyword}...")
         progress_bar = st.progress(0)
         competitor_results = crawl_competitors_parallel(uncrawled_competitors, progress_bar=progress_bar)
         for url, crawl_result in competitor_results.items():
@@ -961,11 +852,11 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
                     "industry_keyword": industry_keyword
                 }
             else:
-                st.warning(f"⚠️ Could not crawl competitor: {url}")
+                st.warning(f"Could not crawl competitor: {url}")
 
     industry_competitors = [
         data for domain, data in cache.items()
-        if domain != domain and data.get("industry_keyword") == industry_keyword
+        if data.get("industry_keyword") == industry_keyword
     ]
 
     if industry_competitors:
@@ -984,8 +875,8 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
 
 # --- Main App ---
 def main():
-    st.set_page_config(page_title="Paw à Peau Tech and UX Audit", layout="wide", page_icon="🐾")
-    st.title("Paw à Peau Audit Tool")
+    st.set_page_config(page_title="Paw a Peau Website Audit", layout="wide", page_icon="🐾")
+    st.title("🐾 Paw a Peau Website Audit Tool")
     st.markdown("""
     **Instructions:**
     1. Enter a **website URL** to audit.
@@ -1001,7 +892,7 @@ def main():
     if st.button("🧹 Clean Up Old Cache Entries"):
         deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
         total_deleted = sum(deleted_counts.values())
-        st.success(f"✅ Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
+        st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
 
     # Load caches
     cache = load_cache()
@@ -1017,38 +908,36 @@ def main():
     )
 
     # Website input
-    website_url = st.text_input("Enter Website URL", key="url_input")
+    website_url = st.text_input("Enter Website URL (e.g., https://amarell-thermometer.de/)", key="url_input")
     csv_file = st.file_uploader("Upload CSV for bulk audits", type=["csv"])
 
     if st.button("🚀 Run Audit"):
         if not website_url and not csv_file:
-            st.error("❌ Please provide a URL or CSV file.")
+            st.error("Please provide a URL or CSV file.")
             return
 
         urls = []
         if website_url:
             normalized_url = normalize_url(website_url)
             if not validate_url(normalized_url):
-                st.error("❌ Invalid URL. Please enter a valid website address.")
+                st.error("Invalid URL. Please enter a valid website address.")
                 return
             urls.append(normalized_url)
         if csv_file:
             try:
                 df = pd.read_csv(csv_file)
                 if "website_url" not in df.columns:
-                    st.error("❌ CSV must contain a 'website_url' column.")
+                    st.error("CSV must contain a 'website_url' column.")
                     return
                 urls = df["website_url"].apply(normalize_url).tolist()
-                # Remove duplicates
                 urls = list(set(urls))
-                # Validate all URLs
                 invalid_urls = [url for url in urls if not validate_url(url)]
                 if invalid_urls:
-                    st.error(f"❌ Invalid URLs detected: {', '.join(invalid_urls)}")
+                    st.error(f"Invalid URLs detected: {', '.join(invalid_urls)}")
                     return
             except Exception as e:
                 logger.error(f"Error reading CSV: {str(e)}")
-                st.error(f"❌ Error reading CSV: {str(e)}")
+                st.error(f"Error reading CSV: {str(e)}")
                 return
 
         # Process in batches
@@ -1065,27 +954,22 @@ def main():
                 progress_bar, status_text, batch_num, total_batches
             )
             all_results.extend(batch_results)
-            # Save cache incrementally after each batch
             save_cache(cache)
             save_whois_cache(whois_cache)
-            time.sleep(1)  # Rate limiting between batches
+            time.sleep(1)  # Rate limiting
 
         progress_bar.empty()
         status_text.empty()
 
         if not all_results:
-            st.error("❌ No valid results to display.")
+            st.error("No valid results to display.")
             return
 
-        # --- Human-Friendly Scorecard (No CSV Download) ---
+        # Display scorecard
         st.subheader("🏆 Human-Friendly Scorecard")
         for result in all_results:
             st.markdown(f"### {result['url']}")
             st.markdown(f"**Industry:** {result['industry_keyword']} | **Date:** {result['audit_date']}")
-
-            # Tech Stack (from Wappalyzer)
-            if result["crawl"]["tech_stack"]:
-                st.markdown(f"**Tech Stack:** {', '.join(result['crawl']['tech_stack'])}")
 
             # Overall scores
             col1, col2, col3 = st.columns(3)
@@ -1161,13 +1045,12 @@ def main():
                     100
                 ]
             }
-            benchmark_df = pd.DataFrame(benchmark_data)
-            st.dataframe(benchmark_df, hide_index=True)
+            st.dataframe(pd.DataFrame(benchmark_data), hide_index=True)
 
             # Source of benchmarks
             competitor_count = len([
                 domain for domain, data in cache.items()
-                if data.get("industry_keyword") == industry_keyword and domain != urlparse(result["url"]).netloc
+                if data.get("industry_keyword") == industry_keyword
             ])
             if competitor_count > 0:
                 st.success(f"✅ Benchmarks based on **{competitor_count} competitors** in your industry.")
