@@ -1111,29 +1111,17 @@ def main():
                     100
                 ]
             }
-# Create HTML table with colored scores
-            html = """
-            <table style="width:100%; border-collapse: collapse;">
-                <tr style="background-color: #f0f2f6;">
-                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Category</th>
-                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Your Score</th>
-                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Benchmark</th>
-                </tr>
-            """
-            for i, category in enumerate(benchmark_data["Category"]):
-                your_score = benchmark_data["Analyzed Website Score"][i]
-                benchmark = benchmark_data["Industry Benchmark"][i]
-                color = "green" if your_score > benchmark else "red" if your_score < benchmark else "black"
-                html += f"""
-                <tr style="border: 1px solid #ddd;">
-                    <td style="padding: 8px; border: 1px solid #ddd;">{category}</td>
-                    <td style="padding: 8px; border: 1px solid #ddd; color: {color}; font-weight: bold;">{your_score}</td>
-                    <td style="padding: 8px; border: 1px solid #ddd;">{benchmark}</td>
-                </tr>
-                """
-            html += "</table>"
+            # Create DataFrame
+            benchmark_df = pd.DataFrame(benchmark_data)
 
-            st.markdown(html, unsafe_allow_html=True)
+            # Apply conditional formatting
+            def highlight_score(s):
+                return ['background-color: #d4f7c5' if s[0] > s[1] else
+                        'background-color: #f7c5c5' if s[0] < s[1] else
+                        '' for s in zip(s, benchmark_df["Benchmark"])]
+
+            styled_df = benchmark_df.style.apply(highlight_score, subset=["Your Score"])
+            st.dataframe(styled_df, hide_index=True)
 
             # Source of benchmarks
             competitor_count = len([
