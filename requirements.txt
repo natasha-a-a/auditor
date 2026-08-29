@@ -1,4 +1,8 @@
 streamlit
-requests
-beautifulsoup4
+firecrawl
 pandas
+beautifulsoup4
+requests
+python-whois
+plotly
+wappalyzer
