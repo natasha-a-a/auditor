@@ -918,7 +918,6 @@ def main():
         st.title("Website Audit Tool")  # Text below logo
 
         st.markdown("""
-    **Instructions:**
     1. Enter a **website URL** to audit.
     2. Select an **industry** from the dropdown.
     3. Click **Run Audit**.
