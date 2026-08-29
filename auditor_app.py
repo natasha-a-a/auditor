@@ -922,7 +922,7 @@ def main():
     1. Enter a **website URL** to audit.
     2. Select an **industry** from the dropdown.
     3. Click **Run Audit**.
-    The tool will analyze the site and display a **scorecard**. For detailed reports, use the **Dashboard App**.
+    The tool will analyze the site and display a **scorecard**.
     """)
 
     # Load caches
