@@ -1118,9 +1118,9 @@ def main():
             def highlight_score(s):
                 return ['background-color: #d4f7c5' if s[0] > s[1] else
                         'background-color: #f7c5c5' if s[0] < s[1] else
-                        '' for s in zip(s, benchmark_df["Benchmark"])]
+                        '' for s in zip(s, benchmark_df["Industry Benchmark"])]
 
-            styled_df = benchmark_df.style.apply(highlight_score, subset=["Your Score"])
+            styled_df = benchmark_df.style.apply(highlight_score, subset=["Analyzed Website Score"])
             st.dataframe(styled_df, hide_index=True)
 
             # Source of benchmarks
