@@ -1,17 +1,3 @@
-Here’s the **full, corrected `auditor_app.py`** with **all missing functions added back**, including:
-✅ SQLite caching (replaces JSON)
-✅ Wappalyzer integration + tech stack caching
-✅ Batch processing for CSVs
-✅ WHOIS retries + caching
-✅ Firecrawl fallback
-✅ Logging
-✅ User feedback (mailto link)
-✅ Cache cleanup (90-day auto-purge + manual button)
-✅ Rate limiting between batches
-
----
-
-```python
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
