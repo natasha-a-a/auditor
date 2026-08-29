@@ -906,8 +906,17 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
 
 # --- Main App ---
 def main():
-    st.set_page_config(page_title="Paw a Peau Website Audit", layout="wide", page_icon="🐾")
-    st.title("🐾 Paw a Peau Website Audit Tool")
+    st.set_page_config(
+    page_title="Paw a Peau Website Audit",
+    layout="wide",
+    page_icon="pawapeaufavicon.png" 
+    )
+# Center logo and title
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+    st.image("pawapeaufavicon.png", width=64)
+    st.title("Paw a Peau Website Audit Tool")  # Text below logo
+
     st.markdown("""
     **Instructions:**
     1. Enter a **website URL** to audit.
@@ -916,18 +925,13 @@ def main():
     The tool will analyze the site and display a **scorecard**. For detailed reports, use the **Dashboard App**.
     """)
 
-    # User feedback
-    st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
-
-    # Cache cleanup button
-    if st.button("🧹 Clean Up Old Cache Entries"):
-        deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
-        total_deleted = sum(deleted_counts.values())
-        st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
-
     # Load caches
     cache = load_cache()
     whois_cache = load_whois_cache()
+
+    # Website input
+    website_url = st.text_input("Enter Website URL", key="url_input")
+    csv_file = st.file_uploader("Upload CSV for bulk audits", type=["csv"])
 
     # Industry dropdown
     industry_options = list(INDUSTRY_BENCHMARKS.keys())
@@ -938,10 +942,13 @@ def main():
         key="industry_dropdown"
     )
 
-    # Website input
-    website_url = st.text_input("Enter Website URL", key="url_input")
-    csv_file = st.file_uploader("Upload CSV for bulk audits", type=["csv"])
+    # Cache cleanup button
+    if st.button("🧹 Clean Up Old Cache Entries"):
+            deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
+            total_deleted = sum(deleted_counts.values())
+            st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
 
+    # Run audit 
     if st.button("🚀 Run Audit"):
         if not website_url and not csv_file:
             st.error("Please provide a URL or CSV file.")
@@ -997,7 +1004,7 @@ def main():
             return
 
         # Display scorecard
-        st.subheader("🏆 Human-Friendly Scorecard")
+        st.subheader("🏆 Scorecard Results")
         for result in all_results:
             st.markdown(f"### {result['url']}")
             st.markdown(f"**Industry:** {result['industry_keyword']} | **Date:** {result['audit_date']}")
@@ -1006,21 +1013,21 @@ def main():
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("🔧 Technical", f"{result['technical']['score']}/100",
-                         delta=f"{result['technical']['score'] - result['benchmarks'].get('technical', 70):+d}")
+                         delta=f"{result['technical']['score'] - result['benchmarks'].get('technical', 70):+.0f}")
                 if result["technical"]["issues"]:
                     with st.expander("⚠️ Technical Issues"):
                         for issue in result["technical"]["issues"]:
                             st.write(f"- {issue}")
             with col2:
                 st.metric("🏢 Business Info", f"{result['business']['score']}/100",
-                         delta=f"{result['business']['score'] - result['benchmarks'].get('business', 70):+d}")
+                         delta=f"{result['business']['score'] - result['benchmarks'].get('business', 70):+.0f}")
                 if result["business"]["issues"]:
                     with st.expander("⚠️ Business Info Issues"):
                         for issue in result["business"]["issues"]:
                             st.write(f"- {issue}")
             with col3:
                 st.metric("🛠️ Functional", f"{result['functional']['score']}/100",
-                         delta=f"{result['functional']['score'] - result['benchmarks'].get('functional', 70):+d}")
+                         delta=f"{result['functional']['score'] - result['benchmarks'].get('functional', 70):+.0f}")
                 if result["functional"]["issues"]:
                     with st.expander("⚠️ Functional Gaps"):
                         for issue in result["functional"]["issues"]:
@@ -1029,21 +1036,21 @@ def main():
             col4, col5, col6 = st.columns(3)
             with col4:
                 st.metric("🔍 SEO", f"{result['seo']['score']}/100",
-                         delta=f"{result['seo']['score'] - result['benchmarks'].get('seo', 70):+d}")
+                         delta=f"{result['seo']['score'] - result['benchmarks'].get('seo', 70):+.0f}")
                 if result["seo"]["issues"]:
                     with st.expander("⚠️ SEO Issues"):
                         for issue in result["seo"]["issues"]:
                             st.write(f"- {issue}")
             with col5:
                 st.metric("💰 Budget", f"{result['budget']['score']}/100",
-                         delta=f"{result['budget']['score'] - result['benchmarks'].get('budget', 70):+d}")
+                         delta=f"{result['budget']['score'] - result['benchmarks'].get('budget', 70):+.0f}")
                 if result["budget"]["issues"]:
                     with st.expander("⚠️ Budget Red Flags"):
                         for issue in result["budget"]["issues"]:
                             st.write(f"- {issue}")
             with col6:
                 st.metric("🚨 Dead End", f"{result['dead_end']['score']}/100",
-                         delta=f"{result['dead_end']['score'] - 100:+d}")
+                         delta=f"{result['dead_end']['score'] - 100:+.0f}")
                 if result["dead_end"]["issues"]:
                     with st.expander("⚠️ Dead End Risks"):
                         for issue in result["dead_end"]["issues"]:
@@ -1090,6 +1097,9 @@ def main():
 
             st.markdown("---")
             st.info("💡 **For detailed CSV reports and pain point shortlists, use the Dashboard App.**")
+# User feedback
+    st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
+
 
 if __name__ == "__main__":
     main()
