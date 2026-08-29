@@ -936,7 +936,7 @@ def main():
         website_url = st.text_input(
             "Enter Website URL",
             key="url_input",
-            placeholder="https://example.com"
+            placeholder="https://companysite.com"
         )
         industry_options = list(INDUSTRY_BENCHMARKS.keys())
         industry_keyword = st.selectbox(
@@ -966,38 +966,42 @@ def main():
             total_deleted = sum(deleted_counts.values())
             st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
 
-    # --- AUDIT LOGIC (Triggered by Run Audit Button) ---
-    if run_audit_clicked:
-        if website_url and csv_file:
-            st.error("❌ **Error:** Please provide **either** a URL **or** a CSV file, not both.")
-            st.stop()
-        elif not website_url and not csv_file:
-            st.error("❌ **Error:** Please provide a URL **or** a CSV file.")
-            st.stop()
-        else:
-            urls = []
-            if website_url:
-                normalized_url = normalize_url(website_url)
-                if not validate_url(normalized_url):
-                    st.error("❌ Invalid URL. Please enter a valid website address.")
+# --- AUDIT LOGIC (Triggered by Run Audit Button) ---
+if run_audit_clicked:
+    # Load caches (must be defined BEFORE process_batch)
+    cache = load_cache()
+    whois_cache = load_whois_cache()
+
+    if website_url and csv_file:
+        st.error("❌ **Error:** Please provide **either** a URL **or** a CSV file, not both.")
+        st.stop()
+    elif not website_url and not csv_file:
+        st.error("❌ **Error:** Please provide a URL **or** a CSV file.")
+        st.stop()
+    else:
+        urls = []
+        if website_url:
+            normalized_url = normalize_url(website_url)
+            if not validate_url(normalized_url):
+                st.error("❌ Invalid URL. Please enter a valid website address.")
+                st.stop()
+            urls.append(normalized_url)
+        if csv_file:
+            try:
+                df = pd.read_csv(csv_file)
+                if "website_url" not in df.columns:
+                    st.error("❌ CSV must contain a 'website_url' column.")
                     st.stop()
-                urls.append(normalized_url)
-            if csv_file:
-                try:
-                    df = pd.read_csv(csv_file)
-                    if "website_url" not in df.columns:
-                        st.error("❌ CSV must contain a 'website_url' column.")
-                        st.stop()
-                    urls = df["website_url"].apply(normalize_url).tolist()
-                    urls = list(set(urls))
-                    invalid_urls = [url for url in urls if not validate_url(url)]
-                    if invalid_urls:
-                        st.error(f"❌ Invalid URLs detected: {', '.join(invalid_urls)}")
-                        st.stop()
-                except Exception as e:
-                    logger.error(f"Error reading CSV: {str(e)}")
-                    st.error(f"❌ Error reading CSV: {str(e)}")
+                urls = df["website_url"].apply(normalize_url).tolist()
+                urls = list(set(urls))
+                invalid_urls = [url for url in urls if not validate_url(url)]
+                if invalid_urls:
+                    st.error(f"❌ Invalid URLs detected: {', '.join(invalid_urls)}")
                     st.stop()
+            except Exception as e:
+                logger.error(f"Error reading CSV: {str(e)}")
+                st.error(f"❌ Error reading CSV: {str(e)}")
+                st.stop()
 
         # Process in batches
         total_urls = len(urls)
@@ -1022,7 +1026,7 @@ def main():
 
         if not all_results:
             st.error("No valid results to display.")
-            return
+            st.stop()
 
         # Display scorecard
         st.subheader("🏆 Scorecard Results")
@@ -1030,6 +1034,8 @@ def main():
             st.markdown(f"### {result['url']}")
             st.markdown(f"**Industry:** {result['industry_keyword']} | **Date:** {result['audit_date']}")
 
+            pass
+        
             # Overall scores
             col1, col2, col3 = st.columns(3)
             with col1:
