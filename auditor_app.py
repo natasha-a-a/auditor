@@ -948,7 +948,7 @@ def main():
         industry_keyword = st.selectbox(
             "Select Industry",
             industry_options,
-            index=len(industry_options)-7,
+            index=len(industry_options)-8,
             key="industry_dropdown"
         )
 
