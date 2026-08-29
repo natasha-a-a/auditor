@@ -13,67 +13,58 @@ from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from firecrawl import FirecrawlApp
 import whois
+import csv
 import os
 
-# 1. Define paths FIRST
-BASE_DIR = Path("/mount/src") if os.path.exists("/mount/src") else Path.cwd()
-CACHE_DIR = BASE_DIR / "audit_cache"
-DB_FILE = CACHE_DIR / "audit_cache.db"
-CACHE_DIR.mkdir(exist_ok=True)
-WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
-WHOIS_DB_FILE = WHOIS_CACHE_DIR / "whois_cache.db"
-CACHE_CLEANUP_DAYS = 90
-BATCH_SIZE = 10
-WHOIS_RETRIES = 2
+# --- Constants ---
+CACHE_DIR = Path("audit_cache")
+WHOIS_CACHE_DIR = Path("whois_cache")
+AUDIT_CSV = CACHE_DIR / "audits.csv"
+WHOIS_CSV = WHOIS_CACHE_DIR / "whois.csv"
 
 # Ensure directories exist
 for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
 
+# --- CSV Helper Functions ---
+def save_to_csv(file_path, data, key_field="domain"):
+    """Save dictionary data to CSV."""
+    file_path.parent.mkdir(exist_ok=True)
+    mode = 'w' if not file_path.exists() else 'a'
+    with open(file_path, mode, newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=["domain", "data", "timestamp"])
+        if mode == 'w':
+            writer.writeheader()
+        for key, value in data.items():
+            writer.writerow({
+                "domain": key,
+                "data": json.dumps(value),  # Store data as JSON string
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
 
-# --- Setup Logging ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("auditor_app.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+def load_from_csv(file_path):
+    """Load CSV data into a dictionary."""
+    if not file_path.exists():
+        return {}
+    with open(file_path, mode='r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        return {row["domain"]: json.loads(row["data"]) for row in reader}
 
-# SQLite database files
-DB_FILE = CACHE_DIR / "audit_cache.db"
-WHOIS_DB_FILE = WHOIS_CACHE_DIR / "whois_cache.db"
+def load_cache():
+    """Load audit cache from CSV."""
+    return load_from_csv(AUDIT_CSV)
 
-# Initialize databases
-def init_db():
-    for db_file in [DB_FILE, WHOIS_DB_FILE]:
-        if not db_file.exists():
-            conn = sqlite3.connect(str(db_file))
-            cursor = conn.cursor()
-            if db_file == DB_FILE:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS audits (
-                        domain TEXT PRIMARY KEY,
-                        data TEXT,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-            elif db_file == WHOIS_DB_FILE:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS whois (
-                        domain TEXT PRIMARY KEY,
-                        expiration_date TEXT,
-                        expiring_soon BOOLEAN,
-                        days_until_expiry INTEGER,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-            conn.commit()
-            conn.close()
+def save_cache(cache):
+    """Save audit cache to CSV."""
+    save_to_csv(AUDIT_CSV, cache)
 
-init_db()
+def load_whois_cache():
+    """Load WHOIS cache from CSV."""
+    return load_from_csv(WHOIS_CSV)
+
+def save_whois_cache(cache):
+    """Save WHOIS cache to CSV."""
+    save_to_csv(WHOIS_CSV, cache)
 
 # Score deductions
 SCORE_DEDUCTIONS = {
