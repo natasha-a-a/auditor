@@ -14,24 +14,21 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from firecrawl import FirecrawlApp
 import whois
 import os
-st.write(f"📁 Current working directory: {os.getcwd()}")
-st.write(f"📁 DB_FILE path: {DB_FILE.absolute()}")
-st.write(f"📁 DB_FILE exists: {DB_FILE.exists()}")
-if DB_FILE.exists():
-    st.write(f"📁 DB_FILE size: {DB_FILE.stat().st_size} bytes")
-    import os
-from pathlib import Path
 
-# CONSTANTS
-# # For Streamlit Cloud, use /mount/src/ as the base directory
+# 1. Define paths FIRST
 BASE_DIR = Path("/mount/src") if os.path.exists("/mount/src") else Path.cwd()
 CACHE_DIR = BASE_DIR / "audit_cache"
-WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
 DB_FILE = CACHE_DIR / "audit_cache.db"
+CACHE_DIR.mkdir(exist_ok=True)
+WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
 WHOIS_DB_FILE = WHOIS_CACHE_DIR / "whois_cache.db"
 CACHE_CLEANUP_DAYS = 90
 BATCH_SIZE = 10
 WHOIS_RETRIES = 2
+
+# 2. Debug AFTER definition
+st.write(f"📁 DB_FILE path: {DB_FILE.absolute()}")
+st.write(f"📁 DB_FILE exists: {DB_FILE.exists()}")
 
 # Ensure directories exist
 for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
