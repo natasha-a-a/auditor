@@ -18,10 +18,6 @@ CACHE_CLEANUP_DAYS = 90
 BATCH_SIZE = 10
 WHOIS_RETRIES = 2
 
-# 2. Debug AFTER definition
-st.write(f"📁 DB_FILE path: {DB_FILE.absolute()}")
-st.write(f"📁 DB_FILE exists: {DB_FILE.exists()}")
-
 # Ensure directories exist
 for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)

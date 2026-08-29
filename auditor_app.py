@@ -26,10 +26,6 @@ CACHE_CLEANUP_DAYS = 90
 BATCH_SIZE = 10
 WHOIS_RETRIES = 2
 
-# 2. Debug AFTER definition
-st.write(f"📁 DB_FILE path: {DB_FILE.absolute()}")
-st.write(f"📁 DB_FILE exists: {DB_FILE.exists()}")
-
 # Ensure directories exist
 for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
@@ -136,18 +132,18 @@ COPYRIGHT_YEAR_THRESHOLD = 2
 
 # Industry benchmarks
 INDUSTRY_BENCHMARKS = {
+    "Automotive": {"technical": 80, "seo": 75, "content": 70, "ux": 75, "business": 80, "functional": 85},
     "E-commerce": {"technical": 85, "seo": 80, "content": 75, "ux": 90, "business": 85, "functional": 90},
+    "Education": {"technical": 70, "seo": 75, "content": 90, "ux": 75, "business": 80, "functional": 80},
+    "Fashion": {"technical": 80, "seo": 85, "content": 85, "ux": 90, "business": 75, "functional": 80},
+    "Finance": {"technical": 90, "seo": 75, "content": 80, "ux": 85, "business": 85, "functional": 90},
+    "Food & Beverage": {"technical": 75, "seo": 70, "content": 80, "ux": 80, "business": 70, "functional": 75},
+    "Healthcare": {"technical": 75, "seo": 70, "content": 85, "ux": 80, "business": 90, "functional": 75},
     "Manufacturing": {"technical": 70, "seo": 60, "content": 65, "ux": 60, "business": 70, "functional": 65},
     "Retail": {"technical": 80, "seo": 85, "content": 80, "ux": 85, "business": 80, "functional": 85},
-    "Technology": {"technical": 95, "seo": 90, "content": 90, "ux": 90, "business": 85, "functional": 90},
-    "Healthcare": {"technical": 75, "seo": 70, "content": 85, "ux": 80, "business": 90, "functional": 75},
-    "Education": {"technical": 70, "seo": 75, "content": 90, "ux": 75, "business": 80, "functional": 80},
-    "Finance": {"technical": 90, "seo": 75, "content": 80, "ux": 85, "business": 85, "functional": 90},
-    "Travel": {"technical": 85, "seo": 85, "content": 80, "ux": 90, "business": 75, "functional": 80},
-    "Food & Beverage": {"technical": 75, "seo": 70, "content": 80, "ux": 80, "business": 70, "functional": 75},
-    "Automotive": {"technical": 80, "seo": 75, "content": 70, "ux": 75, "business": 80, "functional": 85},
     "Real Estate": {"technical": 75, "seo": 80, "content": 75, "ux": 85, "business": 85, "functional": 70},
-    "Fashion": {"technical": 80, "seo": 85, "content": 85, "ux": 90, "business": 75, "functional": 80},
+    "Technology": {"technical": 95, "seo": 90, "content": 90, "ux": 90, "business": 85, "functional": 90},
+    "Travel": {"technical": 85, "seo": 85, "content": 80, "ux": 90, "business": 75, "functional": 80},
     "Other": {"technical": 70, "seo": 65, "content": 70, "ux": 65, "business": 60, "functional": 60}
 }
 
@@ -952,7 +948,7 @@ def main():
         industry_keyword = st.selectbox(
             "Select Industry",
             industry_options,
-            index=len(industry_options)-1,
+            index=len(industry_options)-7,
             key="industry_dropdown"
         )
 
