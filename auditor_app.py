@@ -1080,40 +1080,7 @@ def main():
         The tool will analyze the site(s) and display a **scorecard**.
         """)
 
-    # --- Benchmark Management Section ---
-    st.markdown("### 🎯 Benchmark Website Management")
-    benchmark_websites = load_benchmark_websites()
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Current Benchmark Websites:**")
-        if benchmark_websites:
-            for url in sorted(benchmark_websites):
-                st.write(f"- {url}")
-        else:
-            st.info("No benchmark websites loaded.")
-
-    with col2:
-        st.markdown("**Add/Remove Benchmark Websites**")
-        new_urls = st.text_area("Enter URLs to add (one per line):")
-        if st.button("Add Benchmark Websites"):
-            if new_urls:
-                new_websites = set(url.strip() for url in new_urls.split('\n') if url.strip())
-                updated_websites = benchmark_websites.union(new_websites)
-                save_benchmark_csv(updated_websites)
-                st.success(f"✅ Added {len(new_websites)} benchmark websites!")
-                st.rerun()
-
-        remove_urls = st.text_area("Enter URLs to remove (one per line):")
-        if st.button("Remove Benchmark Websites"):
-            if remove_urls:
-                remove_websites = set(url.strip() for url in remove_urls.split('\n') if url.strip())
-                updated_websites = benchmark_websites - remove_websites
-                save_benchmark_csv(updated_websites)
-                st.success(f"✅ Removed {len(remove_websites)} benchmark websites!")
-                st.rerun()
-
-    st.markdown("---")
 
     # --- MAIN FORM (Side-by-Side) ---
     form_col1, form_col2 = st.columns(2)
@@ -1123,7 +1090,7 @@ def main():
         website_url = st.text_input(
             "Enter Website URL",
             key="url_input",
-            placeholder="https://example.com"
+            placeholder="https://companywebsite.com"
         )
         industry_options = list(INDUSTRY_BENCHMARKS.keys())
         industry_keyword = st.selectbox(
@@ -1289,6 +1256,24 @@ def main():
 
                 st.markdown("---")
 
+   # --- Benchmark Management Section ---
+st.markdown("### 🎯 Benchmark Website Management")
+benchmark_websites = load_benchmark_websites()
+
+col1, col2 = st.columns(2)
+with col1:
+    st.markdown("**Add Benchmark Websites**")
+    new_urls = st.text_area("Enter URLs to add (one per line):")
+    if st.button("Add Benchmark Websites"):
+        if new_urls:
+                new_websites = set(url.strip() for url in new_urls.split('\n') if url.strip())
+                updated_websites = benchmark_websites.union(new_websites)
+                save_benchmark_csv(updated_websites)
+                st.success(f"✅ Added {len(new_websites)} benchmark websites!")
+                st.rerun()
+
+
+    st.markdown("---")
     # --- CACHE CLEANUP & REPORT ISSUES (Bottom Section) ---
     endcol1, end_col2 = st.columns(2)
     with endcol1:
