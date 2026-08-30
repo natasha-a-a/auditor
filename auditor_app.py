@@ -1066,7 +1066,7 @@ def main():
         page_icon="pawapeaufavicon.png"
     )
 
-    # --- HEADER (Logo + Title) ---
+    # --- HEADER ---
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.image("pawapeaufavicon.png", width=64)
@@ -1080,9 +1080,10 @@ def main():
         The tool will analyze the site(s) and display a **scorecard**.
         """)
 
+    # Load benchmark websites early for management section
+    benchmark_websites = load_benchmark_websites()
 
-
-    # --- MAIN FORM (Side-by-Side) ---
+    # --- MAIN FORM  ---
     form_col1, form_col2 = st.columns(2)
 
     # Left column: URL + Industry
@@ -1112,12 +1113,48 @@ def main():
     # --- SEPARATOR ---
     st.markdown("---")
 
+    # --- BENCHMARK MANAGEMENT SECTION  ---
+    st.markdown("### 🎯 Benchmark Website Management")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Current Benchmark Websites:**")
+        if benchmark_websites:
+            for url in sorted(benchmark_websites):
+                st.write(f"- {url}")
+        else:
+            st.info("No benchmark websites loaded.")
+
+    with col2:
+        st.markdown("**Add/Remove Benchmark Websites**")
+        new_urls = st.text_area("Enter URLs to add (one per line):")
+        if st.button("Add Benchmark Websites"):
+            if new_urls:
+                new_websites = set(url.strip() for url in new_urls.split('\n') if url.strip())
+                updated_websites = benchmark_websites.union(new_websites)
+                save_benchmark_csv(updated_websites)
+                st.success(f"✅ Added {len(new_websites)} benchmark websites!")
+                st.rerun()
+
+        remove_urls = st.text_area("Enter URLs to remove (one per line):")
+        if st.button("Remove Benchmark Websites"):
+            if remove_urls:
+                remove_websites = set(url.strip() for url in remove_urls.split('\n') if url.strip())
+                updated_websites = benchmark_websites - remove_websites
+                save_benchmark_csv(updated_websites)
+                st.success(f"✅ Removed {len(remove_websites)} benchmark websites!")
+                st.rerun()
+
+    st.markdown("---")
+
     # --- AUDIT LOGIC (Triggered by Run Audit Button) ---
     if 'run_audit_clicked' in locals() and run_audit_clicked:
+        # Reload benchmark websites in case they were updated
+        benchmark_websites = load_benchmark_websites()
+
         # Load caches
         cache = load_cache()
         whois_cache = load_whois_cache()
-        benchmark_websites = load_benchmark_websites()
 
         if website_url and csv_file:
             st.error("❌ **Error:** Please provide **either** a URL **or** a CSV file, not both.")
@@ -1247,7 +1284,6 @@ def main():
                 }
                 benchmark_df = pd.DataFrame(benchmark_data)
 
-                # FIXED highlight function - uses correct column names
                 def highlight_score(row):
                     score = row['Analyzed Website Score']
                     benchmark = row['Industry Benchmark']
@@ -1276,25 +1312,7 @@ def main():
 
                 st.markdown("---")
 
-   # --- Benchmark Management Section ---
-    st.markdown("### 🎯 Benchmark Website Management")
-    benchmark_websites = load_benchmark_websites()
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Add Benchmark Websites**")
-        new_urls = st.text_area("Enter URLs to add (one per line):")
-        if st.button("Add Benchmark Websites"):
-            if new_urls:
-                new_websites = set(url.strip() for url in new_urls.split('\n') if url.strip())
-                updated_websites = benchmark_websites.union(new_websites)
-                save_benchmark_csv(updated_websites)
-                st.success(f"✅ Added {len(new_websites)} benchmark websites!")
-                st.rerun()
-
-
-    st.markdown("---")
-    # --- CACHE CLEANUP & REPORT ISSUES (Bottom Section) ---
+    # --- BOTTOM SECTION ---
     endcol1, end_col2 = st.columns(2)
     with endcol1:
         if st.button("🧹 Clean Up Old Cache Entries"):
