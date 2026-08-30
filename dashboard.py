@@ -16,7 +16,7 @@ GITHUB_BRANCH = "main"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
 GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
-GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv"  
+GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv"
 
 # --- Helper Functions ---
 def format_score(score, decimals=3):
@@ -44,26 +44,19 @@ def load_benchmark_websites():
     return set(df['url'].tolist())
 
 def load_recommendations():
-    """Load recommendations from CSV (local or GitHub) with error handling."""
+    """Load recommendations from CSV (local or GitHub)."""
     local_path = Path("recommendations.csv")
-
-    # Try local first
     if local_path.exists():
         try:
-            return pd.read_csv(local_path, on_bad_lines='warn', quoting=1)  # quoting=1 = QUOTE_ALL
-        except Exception as e:
-            st.warning(f"⚠️ Local recommendations CSV error: {str(e)}")
-
-    # Fallback to GitHub
+            return pd.read_csv(local_path)
+        except Exception:
+            pass
     try:
         response = requests.get(GITHUB_RECOMMENDATIONS_CSV_URL)
         if response.status_code == 200:
-            # Clean the text to handle line breaks
-            text = response.text.replace('\r\n', '\n').replace('\r', '\n')
-            return pd.read_csv(io.StringIO(text), on_bad_lines='warn', quoting=1)
-    except Exception as e:
-        st.warning(f"⚠️ GitHub recommendations CSV error: {str(e)}")
-
+            return pd.read_csv(io.StringIO(response.text))
+    except Exception:
+        pass
     return pd.DataFrame()
 
 def load_github_cache():
@@ -85,11 +78,8 @@ def extract_contact_info(html, url):
     """Extract contact email and physical address from HTML."""
     if not html:
         return None, None
-
     soup = BeautifulSoup(html, 'html.parser')
     text = soup.get_text()
-
-    # Extract email (prefer non-generic domains)
     email_pattern = r'[\w\.-]+@[\w\.-]+\.\w+'
     emails = re.findall(email_pattern, text)
     contact_email = None
@@ -99,13 +89,10 @@ def extract_contact_info(html, url):
             contact_email = email
             break
     if not contact_email and emails:
-        contact_email = emails[0]  # Fallback to first email
-
-    # Extract physical address (US format)
+        contact_email = emails[0]
     address_pattern = r'\d+\s[\w\s]+,\s[\w\s]+,\s[A-Z]{2}\s\d{5}(?:-\d{4})?'
     address_match = re.search(address_pattern, text)
     physical_address = address_match.group(0) if address_match else None
-
     return contact_email, physical_address
 
 # Load recommendations at startup
@@ -117,9 +104,7 @@ def get_why_it_matters(category, check_name):
         (RECOMMENDATIONS_DF['category'] == category) &
         (RECOMMENDATIONS_DF['check_name'] == check_name)
     ]
-    if not filtered.empty:
-        return filtered.iloc[0]['business_impact']
-    return "Important for overall performance"
+    return filtered.iloc[0]['business_impact'] if not filtered.empty else ""
 
 def get_recommendation(category, check_name):
     """Get recommendation text from CSV data."""
@@ -127,9 +112,7 @@ def get_recommendation(category, check_name):
         (RECOMMENDATIONS_DF['category'] == category) &
         (RECOMMENDATIONS_DF['check_name'] == check_name)
     ]
-    if not filtered.empty:
-        return filtered.iloc[0]['recommendation']
-    return "Consider improvements for better results"
+    return filtered.iloc[0]['recommendation'] if not filtered.empty else ""
 
 def get_business_impact(category, check_name):
     """Get business impact from CSV data."""
@@ -137,9 +120,7 @@ def get_business_impact(category, check_name):
         (RECOMMENDATIONS_DF['category'] == category) &
         (RECOMMENDATIONS_DF['check_name'] == check_name)
     ]
-    if not filtered.empty:
-        return filtered.iloc[0]['business_impact']
-    return "Improving this aspect will enhance your digital presence and business results"
+    return filtered.iloc[0]['business_impact'] if not filtered.empty else ""
 
 # --- Data Processing Functions ---
 def filter_user_audits(cache):
@@ -221,9 +202,9 @@ def generate_full_csv(cache, include_benchmarks=False):
                 "check": "Growth Signals Detected",
                 "status": "Good",
                 "what_i_found": "; ".join(growth_signals),
-                "why_it_matters": "Indicates active business growth",
-                "recommendation": "Leverage growth momentum",
-                "business_impact": "Competitive advantage through active growth",
+                "why_it_matters": get_why_it_matters("growth", "growth_signals_detected"),
+                "recommendation": get_recommendation("growth", "growth_signals_detected"),
+                "business_impact": get_business_impact("growth", "growth_signals_detected"),
                 "priority": "Good",
                 "score": 100,
                 "benchmark": "N/A",
@@ -343,9 +324,15 @@ def main():
                         st.markdown(f"**{check_name.replace('_', ' ').title()}**")
                         st.write(f"- **Status:** {check_data.get('status', 'N/A')}")
                         st.write(f"- **What I Found:** {check_data.get('issue', 'No issues')}")
-                        st.write(f"- **Why It Matters:** {get_why_it_matters(cat_key, check_name)}")
-                        st.write(f"- **Recommendation:** {get_recommendation(cat_key, check_name)}")
-                        st.write(f"- **Business Impact:** {get_business_impact(cat_key, check_name)}")
+                        why_it_matters = get_why_it_matters(cat_key, check_name)
+                        if why_it_matters:
+                            st.write(f"- **Why It Matters:** {why_it_matters}")
+                        recommendation = get_recommendation(cat_key, check_name)
+                        if recommendation:
+                            st.write(f"- **Recommendation:** {recommendation}")
+                        business_impact = get_business_impact(cat_key, check_name)
+                        if business_impact:
+                            st.write(f"- **Business Impact:** {business_impact}")
                         st.markdown("---")
                 else:
                     st.info("No specific checks recorded for this category.")
@@ -486,9 +473,8 @@ def main():
     st.subheader("🎯 Download Websites by Pain Point")
     painpoint_df = generate_painpoint_csv_with_contact(cache)
     if not painpoint_df.empty:
-        # Get unique pain points
         pain_points = painpoint_df['Pain Point'].unique()
-        cols = st.columns(min(len(pain_points), 3))  # Max 3 columns
+        cols = st.columns(min(len(pain_points), 3))
 
         for idx, pain_point in enumerate(pain_points):
             with cols[idx % len(cols)]:
