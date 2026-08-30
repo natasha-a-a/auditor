@@ -3,3 +3,4 @@ www.ge.com,"{""expiring_soon"": false, ""error"": ""can't subtract offset-naive 
 www.honeywell.com,"{""expiring_soon"": false, ""error"": ""can't subtract offset-naive and offset-aware datetimes"", ""timestamp"": ""2026-08-30 00:52:32""}",2026-08-30 00:52:32
 www.siemens.com,"{""expiring_soon"": false, ""error"": ""can't subtract offset-naive and offset-aware datetimes"", ""timestamp"": ""2026-08-30 00:52:57""}",2026-08-30 00:52:57
 www.bosch.com,"{""expiring_soon"": false, ""error"": ""can't subtract offset-naive and offset-aware datetimes"", ""timestamp"": ""2026-08-30 00:53:21""}",2026-08-30 00:53:21
+www.euchner.com,"{""expiring_soon"": false, ""error"": ""WHOIS lookup failed"", ""timestamp"": ""2026-08-30 14:53:22""}",2026-08-30 14:53:22
