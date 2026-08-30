@@ -43,21 +43,66 @@ def load_benchmark_websites():
         return set()
     return set(df['url'].tolist())
 
+
+# Load recommendations at startup
+RECOMMENDATIONS_DF = load_recommendations()
+
 def load_recommendations():
-    """Load recommendations from CSV (local or GitHub)."""
+    """Load recommendations from CSV (local or GitHub) with proper error handling."""
+    expected_columns = ['industry', 'category', 'check_name', 'business_impact', 'recommendation', 'priority']
     local_path = Path("recommendations.csv")
+
+    # Try local first
     if local_path.exists():
         try:
-            return pd.read_csv(local_path)
+            df = pd.read_csv(local_path)
+            if not df.empty and all(col in df.columns for col in expected_columns):
+                return df
         except Exception:
             pass
+
+    # Fallback to GitHub
     try:
         response = requests.get(GITHUB_RECOMMENDATIONS_CSV_URL)
         if response.status_code == 200:
-            return pd.read_csv(io.StringIO(response.text))
+            df = pd.read_csv(io.StringIO(response.text))
+            if not df.empty and all(col in df.columns for col in expected_columns):
+                return df
     except Exception:
         pass
-    return pd.DataFrame()
+
+    # Return empty DataFrame with correct columns to prevent KeyError
+    return pd.DataFrame(columns=expected_columns)
+
+def get_why_it_matters(category, check_name):
+    """Get why it matters text from CSV data."""
+    if RECOMMENDATIONS_DF.empty or not all(col in RECOMMENDATIONS_DF.columns for col in ['category', 'check_name', 'business_impact']):
+        return ""
+    filtered = RECOMMENDATIONS_DF[
+        (RECOMMENDATIONS_DF['category'] == category) &
+        (RECOMMENDATIONS_DF['check_name'] == check_name)
+    ]
+    return filtered.iloc[0]['business_impact'] if not filtered.empty else ""
+
+def get_recommendation(category, check_name):
+    """Get recommendation text from CSV data."""
+    if RECOMMENDATIONS_DF.empty or not all(col in RECOMMENDATIONS_DF.columns for col in ['category', 'check_name', 'recommendation']):
+        return ""
+    filtered = RECOMMENDATIONS_DF[
+        (RECOMMENDATIONS_DF['category'] == category) &
+        (RECOMMENDATIONS_DF['check_name'] == check_name)
+    ]
+    return filtered.iloc[0]['recommendation'] if not filtered.empty else ""
+
+def get_business_impact(category, check_name):
+    """Get business impact from CSV data."""
+    if RECOMMENDATIONS_DF.empty or not all(col in RECOMMENDATIONS_DF.columns for col in ['category', 'check_name', 'business_impact']):
+        return ""
+    filtered = RECOMMENDATIONS_DF[
+        (RECOMMENDATIONS_DF['category'] == category) &
+        (RECOMMENDATIONS_DF['check_name'] == check_name)
+    ]
+    return filtered.iloc[0]['business_impact'] if not filtered.empty else ""
 
 def load_github_cache():
     """Load audit cache from GitHub CSV."""
@@ -94,33 +139,6 @@ def extract_contact_info(html, url):
     address_match = re.search(address_pattern, text)
     physical_address = address_match.group(0) if address_match else None
     return contact_email, physical_address
-
-# Load recommendations at startup
-RECOMMENDATIONS_DF = load_recommendations()
-
-def get_why_it_matters(category, check_name):
-    """Get why it matters text from CSV data."""
-    filtered = RECOMMENDATIONS_DF[
-        (RECOMMENDATIONS_DF['category'] == category) &
-        (RECOMMENDATIONS_DF['check_name'] == check_name)
-    ]
-    return filtered.iloc[0]['business_impact'] if not filtered.empty else ""
-
-def get_recommendation(category, check_name):
-    """Get recommendation text from CSV data."""
-    filtered = RECOMMENDATIONS_DF[
-        (RECOMMENDATIONS_DF['category'] == category) &
-        (RECOMMENDATIONS_DF['check_name'] == check_name)
-    ]
-    return filtered.iloc[0]['recommendation'] if not filtered.empty else ""
-
-def get_business_impact(category, check_name):
-    """Get business impact from CSV data."""
-    filtered = RECOMMENDATIONS_DF[
-        (RECOMMENDATIONS_DF['category'] == category) &
-        (RECOMMENDATIONS_DF['check_name'] == check_name)
-    ]
-    return filtered.iloc[0]['business_impact'] if not filtered.empty else ""
 
 # --- Data Processing Functions ---
 def filter_user_audits(cache):
