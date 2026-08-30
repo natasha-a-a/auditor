@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 import plotly.express as px
 import io
 import numpy as np
+from bs4 import BeautifulSoup
+import re
 
 # --- Constants ---
 GITHUB_REPO = "natasha-a-a/auditor"
@@ -54,6 +56,33 @@ def load_github_cache():
         }
         for _, row in df.iterrows()
     }
+
+def extract_contact_info(html, url):
+    """Extract contact email and physical address from HTML."""
+    if not html:
+        return None, None
+
+    soup = BeautifulSoup(html, 'html.parser')
+    text = soup.get_text()
+
+    # Extract email (prefer non-generic domains)
+    email_pattern = r'[\w\.-]+@[\w\.-]+\.\w+'
+    emails = re.findall(email_pattern, text)
+    contact_email = None
+    generic_domains = ['gmail', 'yahoo', 'hotmail', 'outlook', 'aol', 'protonmail']
+    for email in emails:
+        if not any(domain in email.lower() for domain in generic_domains):
+            contact_email = email
+            break
+    if not contact_email and emails:
+        contact_email = emails[0]  # Fallback to first email if no non-generic found
+
+    # Extract physical address (US format)
+    address_pattern = r'\d+\s[\w\s]+,\s[\w\s]+,\s[A-Z]{2}\s\d{5}(?:-\d{4})?'
+    address_match = re.search(address_pattern, text)
+    physical_address = address_match.group(0) if address_match else None
+
+    return contact_email, physical_address
 
 # --- Data Processing Functions ---
 def filter_user_audits(cache):
@@ -145,6 +174,44 @@ def generate_full_csv(cache, include_benchmarks=False):
             })
     return pd.DataFrame(csv_data)
 
+def generate_painpoint_csv_with_contact(cache):
+    """Generate a CSV of websites categorized by primary pain point with contact info."""
+    user_cache = filter_user_audits(cache)
+    category_map = {
+        "Technical": "Technical Issues",
+        "Business Info": "Business Info Gaps",
+        "Functional": "Functional Gaps",
+        "SEO": "SEO Weaknesses",
+        "Budget": "Budget Constraints",
+        "Dead End": "Dead End Risks"
+    }
+
+    painpoint_data = []
+    for domain, data in user_cache.items():
+        html = data.get('crawl', {}).get('html', '')
+        contact_email, physical_address = extract_contact_info(html, data.get('url', ''))
+
+        scores = {
+            "Technical": data.get("technical", {}).get("score", 0),
+            "Business Info": data.get("business", {}).get("score", 0),
+            "Functional": data.get("functional", {}).get("score", 0),
+            "SEO": data.get("seo", {}).get("score", 0),
+            "Budget": data.get("budget", {}).get("score", 0),
+            "Dead End": data.get("dead_end", {}).get("score", 0)
+        }
+        worst_category = min(scores, key=scores.get)
+        category = category_map[worst_category]
+
+        painpoint_data.append({
+            "Website": data.get("url", "N/A"),
+            "Pain Point": category,
+            "Contact Email": contact_email or "Not found",
+            "Physical Address": physical_address or "Not found",
+            "Industry": data.get("industry_keyword", "Other")
+        })
+
+    return pd.DataFrame(painpoint_data)
+
 def get_why_it_matters(category, status):
     """Get why it matters text based on category and status."""
     if status == "Critical":
@@ -222,43 +289,6 @@ def get_business_impact(category, check_name):
     }
     return impacts.get(category, {}).get(check_name, "Improving this aspect will enhance your digital presence and business results")
 
-def generate_painpoint_csv(cache):
-    """Generate a CSV of websites categorized by primary pain point."""
-    user_cache = filter_user_audits(cache)
-    pain_points = {
-        "Technical Issues": [],
-        "Business Info Gaps": [],
-        "Functional Gaps": [],
-        "SEO Weaknesses": [],
-        "Budget Constraints": [],
-        "Dead End Risks": []
-    }
-    category_map = {
-        "Technical": "Technical Issues",
-        "Business Info": "Business Info Gaps",
-        "Functional": "Functional Gaps",
-        "SEO": "SEO Weaknesses",
-        "Budget": "Budget Constraints",
-        "Dead End": "Dead End Risks"
-    }
-    for domain, data in user_cache.items():
-        scores = {
-            "Technical": data.get("technical", {}).get("score", 0),
-            "Business Info": data.get("business", {}).get("score", 0),
-            "Functional": data.get("functional", {}).get("score", 0),
-            "SEO": data.get("seo", {}).get("score", 0),
-            "Budget": data.get("budget", {}).get("score", 0),
-            "Dead End": data.get("dead_end", {}).get("score", 0)
-        }
-        worst_category = min(scores, key=scores.get)
-        pain_points[category_map[worst_category]].append(data.get("url", "N/A"))
-
-    painpoint_data = []
-    for category, urls in pain_points.items():
-        for url in urls:
-            painpoint_data.append({"Pain Point": category, "URL": url, "Count": len(urls)})
-    return pd.DataFrame(painpoint_data)
-
 def calculate_statistics(scores):
     """Calculate basic statistics for a list of scores."""
     if not scores:
@@ -277,10 +307,6 @@ def main():
     st.set_page_config(page_title="Paw à Peau Audit Dashboard", layout="wide", page_icon="📊")
     st.title("📊 Paw à Peau Website Audit Dashboard")
 
-    # Debug: Show GitHub URLs
-    st.write(f"🔗 Fetching audits from: {GITHUB_AUDIT_CSV_URL}")
-    st.write(f"🔗 Fetching benchmarks from: {GITHUB_BENCHMARK_CSV_URL}")
-
     # Manual refresh button
     if st.button("🔄 Refresh Data from GitHub"):
         st.rerun()
@@ -291,7 +317,6 @@ def main():
         st.warning("⚠️ No audit data found. Run the auditor app and commit CSV files to GitHub first.")
         st.stop()
 
-    # Define user_cache here for all subsequent sections
     user_cache = filter_user_audits(cache)
     if not user_cache:
         st.warning("⚠️ No user-submitted audits found. Only benchmark websites exist in the data.")
@@ -381,38 +406,27 @@ def main():
                     mime="text/csv"
                 )
 
-        last_10_data = []
-        for domain, data in last_10_entries.items():
-            last_10_data.append({
-                "URL": data.get("url", "N/A"),
-                "Date": data.get("audit_date", data.get("timestamp", "N/A")),
-                "Industry": data.get("industry_keyword", "Other"),
-                "Technical": format_score(data.get("technical", {}).get("score", 0)),
-                "Business Info": format_score(data.get("business", {}).get("score", 0)),
-                "Functional": format_score(data.get("functional", {}).get("score", 0)),
-                "SEO": format_score(data.get("seo", {}).get("score", 0)),
-                "Budget": format_score(data.get("budget", {}).get("score", 0)),
-                "Dead End": format_score(data.get("dead_end", {}).get("score", 0)),
-                "Growth Signals": ", ".join(data.get("growth", {}).get("growth_signals", [])) or "None"
-            })
-
-        last_10_df = pd.DataFrame(last_10_data)
-
-        # Display table
-        st.dataframe(last_10_df, use_container_width=True)
-
-        # Individual download buttons for each of the last 10
+        # Cleaned up individual reports table
         st.markdown("### 📥 Individual In-Depth Reports")
+        report_data = []
         for domain, data in last_10_entries.items():
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.markdown(f"**{data.get('url', 'N/A')}** - {data.get('audit_date', 'N/A')}")
-            with col2:
+            report_data.append({
+                "Website": data.get('url', 'N/A'),
+                "Date": data.get('audit_date', 'N/A')
+            })
+        report_df = pd.DataFrame(report_data)
+        st.dataframe(report_df, hide_index=True, use_container_width=True)
+
+        # Download buttons
+        st.markdown("**Download Reports:**")
+        cols = st.columns(min(len(last_10_entries), 5))  # Max 5 columns
+        for idx, (domain, data) in enumerate(last_10_entries.items()):
+            with cols[idx % len(cols)]:
                 individual_df = generate_full_csv({domain: data})
                 if not individual_df.empty:
                     csv_individual = individual_df.to_csv(index=False)
                     st.download_button(
-                        label=f"Download {data.get('url', 'N/A')[:20]}... Report",
+                        label="Download CSV",
                         data=csv_individual,
                         file_name=f"audit_{data.get('url', 'website').replace('https://', '').replace('/', '_')}_{datetime.now().strftime('%Y%m%d')}.csv",
                         mime="text/csv",
@@ -497,44 +511,17 @@ def main():
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(trend_df, use_container_width=True)
 
-    # --- Pain Point Shortlists (User Audits Only) ---
-    st.subheader("🎯 Websites by Primary Pain Point (User Audits Only)")
-    painpoint_csv_df = generate_painpoint_csv(cache)
-    if not painpoint_csv_df.empty:
-        # Display as expandable sections
-        pain_points = {
-            "Technical Issues": [],
-            "Business Info Gaps": [],
-            "Functional Gaps": [],
-            "SEO Weaknesses": [],
-            "Budget Constraints": [],
-            "Dead End Risks": []
-        }
-        category_map = {
-            "Technical": "Technical Issues",
-            "Business Info": "Business Info Gaps",
-            "Functional": "Functional Gaps",
-            "SEO": "SEO Weaknesses",
-            "Budget": "Budget Constraints",
-            "Dead End": "Dead End Risks"
-        }
-        for domain, data in user_cache.items():
-            scores = {
-                "Technical": data.get("technical", {}).get("score", 0),
-                "Business Info": data.get("business", {}).get("score", 0),
-                "Functional": data.get("functional", {}).get("score", 0),
-                "SEO": data.get("seo", {}).get("score", 0),
-                "Budget": data.get("budget", {}).get("score", 0),
-                "Dead End": data.get("dead_end", {}).get("score", 0)
-            }
-            worst_category = min(scores, key=scores.get)
-            pain_points[category_map[worst_category]].append(data.get("url", "N/A"))
-
-        for category, urls in pain_points.items():
-            if urls:
-                with st.expander(f"{category} ({len(urls)} websites)"):
-                    for url in urls:
-                        st.write(f"- {url}")
+    # --- Pain Point Download (User Audits Only) ---
+    st.subheader("🎯 Download Websites by Pain Point")
+    painpoint_df = generate_painpoint_csv_with_contact(cache)
+    if not painpoint_df.empty:
+        csv_painpoint = painpoint_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Pain Point List with Contact Info",
+            data=csv_painpoint,
+            file_name=f"painpoint_contacts_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv"
+        )
 
 if __name__ == "__main__":
     main()
