@@ -203,6 +203,13 @@ def generate_full_csv(cache, include_benchmarks=False):
 
         for category in ["technical", "business", "functional", "seo", "budget"]:
             for check_name, check_data in data.get(category, {}).get("checks", {}).items():
+                # Correct status for specific checks
+                status = check_data.get('status', 'N/A')
+                if check_name in ['flash_elements', 'outdated_plugins'] and status == 'Good':
+                    status = 'Needs improvement'
+                elif check_name == 'ssl_tls' and status == 'Good':
+                    status = 'Critical' if not data.get('crawl', {}).get('ssl_valid', True) else 'Good'
+
                 csv_data.append({
                     "page_url": url,
                     "audit_date": audit_date,
@@ -213,11 +220,11 @@ def generate_full_csv(cache, include_benchmarks=False):
                               "SEO & Visibility" if category == "seo" else
                               "Budget & Resources",
                     "check": check_name.replace("_", " ").title(),
-                    "status": check_data.get("status", "N/A"),
+                    "status": status,
                     "what_i_found": check_data.get("issue", "No issues"),
-                    "why_it_matters": get_why_it_matters(category, check_name),
-                    "recommendation": get_recommendation(category, check_name),
-                    "business_impact": get_business_impact(category, check_name),
+                    "why_it_matters": get_why_it_matters(category, check_name) if status != "Good" else "",
+                    "recommendation": get_recommendation(category, check_name) if status != "Good" else "",
+                    "business_impact": get_business_impact(category, check_name) if status != "Good" else "",
                     "priority": check_data.get("status", "N/A"),
                     "score": data.get(category, {}).get("score", 0),
                     "benchmark": benchmarks.get(category, 70),
@@ -233,9 +240,9 @@ def generate_full_csv(cache, include_benchmarks=False):
                 "check": check_name.replace("_", " ").title(),
                 "status": check_data.get("status", "N/A"),
                 "what_i_found": check_data.get("issue", "No issues"),
-                "why_it_matters": get_why_it_matters("dead_end", check_name),
-                "recommendation": get_recommendation("dead_end", check_name),
-                "business_impact": get_business_impact("dead_end", check_name),
+                "why_it_matters": get_why_it_matters("dead_end", check_name) if check_data.get("status", "N/A") != "Good" else "",
+                "recommendation": get_recommendation("dead_end", check_name) if check_data.get("status", "N/A") != "Good" else "",
+                "business_impact": get_business_impact("dead_end", check_name) if check_data.get("status", "N/A") != "Good" else "",
                 "priority": check_data.get("status", "N/A"),
                 "score": data.get("dead_end", {}).get("score", 0),
                 "benchmark": 100,
@@ -252,9 +259,9 @@ def generate_full_csv(cache, include_benchmarks=False):
                 "check": "Growth Signals Detected",
                 "status": "Good",
                 "what_i_found": "; ".join(growth_signals),
-                "why_it_matters": get_why_it_matters("growth", "growth_signals_detected"),
-                "recommendation": get_recommendation("growth", "growth_signals_detected"),
-                "business_impact": get_business_impact("growth", "growth_signals_detected"),
+                "why_it_matters": "",
+                "recommendation": "",
+                "business_impact": "",
                 "priority": "Good",
                 "score": 100,
                 "benchmark": "N/A",
@@ -372,11 +379,25 @@ def main():
                 if checks:
                     for check_name, check_data in checks.items():
                         st.markdown(f"**{check_name.replace('_', ' ').title()}**")
-                        st.write(f"- **Status:** {check_data.get('status', 'N/A')}")
+                        status = check_data.get('status', 'N/A')
+
+                        # Correct status display for specific checks
+                        if check_name in ['flash_elements', 'outdated_plugins']:
+                            display_status = "Needs improvement" if check_name in check_data else status
+                        elif check_name == 'ssl_tls' and status == 'Good':
+                            display_status = "Critical" if not last_data.get('crawl', {}).get('ssl_valid', True) else status
+                        else:
+                            display_status = status
+
+                        st.write(f"- **Status:** {display_status}")
                         st.write(f"- **What I Found:** {check_data.get('issue', 'No issues')}")
-                        st.write(f"- **Why It Matters:** {get_why_it_matters(cat_key, check_name)}")
-                        st.write(f"- **Recommendation:** {get_recommendation(cat_key, check_name)}")
-                        st.write(f"- **Business Impact:** {get_business_impact(cat_key, check_name)}")
+
+                        # Only show recommendations if status is not Good
+                        if status != "Good":
+                            st.write(f"- **Why It Matters:** {get_why_it_matters(cat_key, check_name)}")
+                            st.write(f"- **Recommendation:** {get_recommendation(cat_key, check_name)}")
+                            st.write(f"- **Business Impact:** {get_business_impact(cat_key, check_name)}")
+
                         st.markdown("---")
                 else:
                     st.info("No specific checks recorded for this category.")
