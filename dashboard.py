@@ -7,14 +7,21 @@ from datetime import datetime, timedelta
 import plotly.express as px
 import io
 
-# --- Constants (MUST MATCH auditor_app.py) ---
+# --- Constants ---
 GITHUB_REPO = "natasha-a-a/auditor"
 GITHUB_BRANCH = "main"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
 GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_WHOIS_CSV_URL = f"{GITHUB_RAW_BASE}/whois_cache/whois.csv"
 
-# --- CSV Helper Functions (Fetch from GitHub) ---
+# --- Helper Functions ---
+def format_score(score, decimals=3):
+    """Format score to maximum `decimals` decimal places."""
+    if isinstance(score, (int, float)):
+        formatted = f"{score:.{decimals}f}"
+        return formatted.rstrip('0').rstrip('.') if '.' in formatted else formatted
+    return str(score)
+
 def fetch_csv_from_github(url):
     """Fetch CSV file directly from GitHub raw URL."""
     try:
@@ -42,97 +49,90 @@ def load_github_cache():
 def filter_recent_entries(cache, days=7):
     """Filter cache entries from the last N days."""
     cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    return {k: v for k, v in cache.items() if v.get("audit_date", "") >= cutoff_date}
+    return {k: v for k, v in cache.items() if v.get("audit_date", v.get("timestamp", "")) >= cutoff_date}
 
 def get_last_n_entries(cache, n=10):
     """Get the last N entries from the cache."""
-    sorted_entries = sorted(cache.items(), key=lambda x: x[1].get("audit_date", ""), reverse=True)
+    sorted_entries = sorted(
+        cache.items(),
+        key=lambda x: x[1].get("audit_date", x[1].get("timestamp", "")),
+        reverse=True
+    )
     return dict(sorted_entries[:n])
 
 def generate_full_csv(cache):
     """Generate a CSV of all audit data in the cache."""
     csv_data = []
     for domain, data in cache.items():
-        url = data["url"]
-        audit_date = data["audit_date"]
-        benchmarks = data["benchmarks"]
+        url = data.get("url", "N/A")
+        audit_date = data.get("audit_date", data.get("timestamp", "N/A"))
+        benchmarks = data.get("benchmarks", {})
 
-        for check_name, check_data in data["technical"]["checks"].items():
+        for category in ["technical", "business", "functional", "seo", "budget"]:
+            for check_name, check_data in data.get(category, {}).get("checks", {}).items():
+                csv_data.append({
+                    "page_url": url,
+                    "audit_date": audit_date,
+                    "audit_type": category.capitalize(),
+                    "section": "Performance & Security" if category == "technical" else
+                              "Business Presentation" if category == "business" else
+                              "Functional Gaps" if category == "functional" else
+                              "SEO & Visibility" if category == "seo" else
+                              "Budget & Resources",
+                    "check": check_name.replace("_", " ").title(),
+                    "status": check_data.get("status", "N/A"),
+                    "what_i_found": check_data.get("issue", "No issues"),
+                    "why_it_matters": "Critical for security" if check_data.get("status") == "Critical" else
+                                    "Critical for trust" if category == "business" and check_data.get("status") == "Critical" else
+                                    "Critical for conversions" if category == "functional" and check_data.get("status") == "Critical" else
+                                    "Critical for visibility" if category == "seo" and check_data.get("status") == "Critical" else
+                                    "Indicates low digital investment" if category == "budget" and check_data.get("status") != "Good" else
+                                    "No immediate risk",
+                    "recommendation": "Fix immediately" if check_data.get("status") == "Critical" else
+                                     "Add missing information" if category == "business" and check_data.get("status") != "Good" else
+                                     "Implement missing functionality" if category == "functional" and check_data.get("status") != "Good" else
+                                     "Optimize for search engines" if category == "seo" and check_data.get("status") != "Good" else
+                                     "Invest in digital presence" if category == "budget" and check_data.get("status") != "Good" else
+                                     "Monitor domain status",
+                    "priority": check_data.get("status", "N/A"),
+                    "score": data.get(category, {}).get("score", 0),
+                    "benchmark": benchmarks.get(category, 70),
+                    "vs_benchmark": "Above" if data.get(category, {}).get("score", 0) > benchmarks.get(category, 70) else "Below"
+                })
+
+        for check_name, check_data in data.get("dead_end", {}).get("checks", {}).items():
             csv_data.append({
-                "page_url": url, "audit_date": audit_date, "audit_type": "Technical",
-                "section": "Performance & Security", "check": check_name.replace("_", " ").title(),
-                "status": check_data["status"], "what_i_found": check_data["issue"] or "No issues",
-                "why_it_matters": "Critical for security" if check_data["status"] == "Critical" else "Improves robustness",
-                "recommendation": "Fix immediately" if check_data["status"] == "Critical" else "Review and improve",
-                "priority": check_data["status"], "score": data["technical"]["score"],
-                "benchmark": benchmarks.get("technical", 70),
-                "vs_benchmark": "Above" if data["technical"]["score"] > benchmarks.get("technical", 70) else "Below"
-            })
-        for check_name, check_data in data["business"]["checks"].items():
-            csv_data.append({
-                "page_url": url, "audit_date": audit_date, "audit_type": "Business Info",
-                "section": "Business Presentation", "check": check_name.replace("_", " ").title(),
-                "status": check_data["status"], "what_i_found": check_data["issue"] or "No issues",
-                "why_it_matters": "Critical for trust" if check_data["status"] == "Critical" else "Improves credibility",
-                "recommendation": "Add missing information" if check_data["status"] != "Good" else "None",
-                "priority": check_data["status"], "score": data["business"]["score"],
-                "benchmark": benchmarks.get("business", 70),
-                "vs_benchmark": "Above" if data["business"]["score"] > benchmarks.get("business", 70) else "Below"
-            })
-        for check_name, check_data in data["functional"]["checks"].items():
-            csv_data.append({
-                "page_url": url, "audit_date": audit_date, "audit_type": "Functional",
-                "section": "Functional Gaps", "check": check_name.replace("_", " ").title(),
-                "status": check_data["status"], "what_i_found": check_data["issue"] or "No issues",
-                "why_it_matters": "Critical for conversions" if check_data["status"] == "Critical" else "Improves user experience",
-                "recommendation": "Implement missing functionality" if check_data["status"] != "Good" else "None",
-                "priority": check_data["status"], "score": data["functional"]["score"],
-                "benchmark": benchmarks.get("functional", 70),
-                "vs_benchmark": "Above" if data["functional"]["score"] > benchmarks.get("functional", 70) else "Below"
-            })
-        for check_name, check_data in data["seo"]["checks"].items():
-            csv_data.append({
-                "page_url": url, "audit_date": audit_date, "audit_type": "SEO",
-                "section": "SEO & Visibility", "check": check_name.replace("_", " ").title(),
-                "status": check_data["status"], "what_i_found": check_data["issue"] or "No issues",
-                "why_it_matters": "Critical for visibility" if check_data["status"] == "Critical" else "Improves rankings",
-                "recommendation": "Optimize for search engines" if check_data["status"] != "Good" else "None",
-                "priority": check_data["status"], "score": data["seo"]["score"],
-                "benchmark": benchmarks.get("seo", 70),
-                "vs_benchmark": "Above" if data["seo"]["score"] > benchmarks.get("seo", 70) else "Below"
-            })
-        for check_name, check_data in data["budget"]["checks"].items():
-            csv_data.append({
-                "page_url": url, "audit_date": audit_date, "audit_type": "Budget Red Flags",
-                "section": "Budget & Resources", "check": check_name.replace("_", " ").title(),
-                "status": check_data["status"], "what_i_found": check_data["issue"] or "No issues",
-                "why_it_matters": "Indicates low digital investment" if check_data["status"] != "Good" else "No concerns",
-                "recommendation": "Invest in digital presence" if check_data["status"] != "Good" else "None",
-                "priority": check_data["status"], "score": data["budget"]["score"],
-                "benchmark": benchmarks.get("budget", 70),
-                "vs_benchmark": "Above" if data["budget"]["score"] > benchmarks.get("budget", 70) else "Below"
-            })
-        for check_name, check_data in data["dead_end"]["checks"].items():
-            csv_data.append({
-                "page_url": url, "audit_date": audit_date, "audit_type": "Dead End Detection",
-                "section": "Domain Health", "check": check_name.replace("_", " ").title(),
-                "status": check_data["status"], "what_i_found": check_data["issue"] or "No issues",
-                "why_it_matters": "Critical for business continuity" if check_data["status"] == "Critical" else "No immediate risk",
-                "recommendation": "Renew domain immediately" if check_data["status"] == "Critical" else "Monitor domain status",
-                "priority": check_data["status"], "score": data["dead_end"]["score"],
+                "page_url": url,
+                "audit_date": audit_date,
+                "audit_type": "Dead End Detection",
+                "section": "Domain Health",
+                "check": check_name.replace("_", " ").title(),
+                "status": check_data.get("status", "N/A"),
+                "what_i_found": check_data.get("issue", "No issues"),
+                "why_it_matters": "Critical for business continuity" if check_data.get("status") == "Critical" else "No immediate risk",
+                "recommendation": "Renew domain immediately" if check_data.get("status") == "Critical" else "Monitor domain status",
+                "priority": check_data.get("status", "N/A"),
+                "score": data.get("dead_end", {}).get("score", 0),
                 "benchmark": 100,
-                "vs_benchmark": "Above" if data["dead_end"]["score"] == 100 else "Below"
+                "vs_benchmark": "Above" if data.get("dead_end", {}).get("score", 0) == 100 else "Below"
             })
-        growth_signals = data["growth"]["growth_signals"]
+
+        growth_signals = data.get("growth", {}).get("growth_signals", [])
         if growth_signals:
             csv_data.append({
-                "page_url": url, "audit_date": audit_date, "audit_type": "Growth Signals",
-                "section": "Growth Indicators", "check": "Growth Signals Detected",
-                "status": "Good", "what_i_found": "; ".join(growth_signals),
+                "page_url": url,
+                "audit_date": audit_date,
+                "audit_type": "Growth Signals",
+                "section": "Growth Indicators",
+                "check": "Growth Signals Detected",
+                "status": "Good",
+                "what_i_found": "; ".join(growth_signals),
                 "why_it_matters": "Indicates active business growth",
                 "recommendation": "Leverage growth momentum",
-                "priority": "Good", "score": 100,
-                "benchmark": "N/A", "vs_benchmark": "N/A"
+                "priority": "Good",
+                "score": 100,
+                "benchmark": "N/A",
+                "vs_benchmark": "N/A"
             })
     return pd.DataFrame(csv_data)
 
@@ -146,25 +146,25 @@ def generate_painpoint_csv(cache):
         "Budget Constraints": [],
         "Dead End Risks": []
     }
+    category_map = {
+        "Technical": "Technical Issues",
+        "Business Info": "Business Info Gaps",
+        "Functional": "Functional Gaps",
+        "SEO": "SEO Weaknesses",
+        "Budget": "Budget Constraints",
+        "Dead End": "Dead End Risks"
+    }
     for domain, data in cache.items():
         scores = {
-            "Technical": data["technical"]["score"],
-            "Business Info": data["business"]["score"],
-            "Functional": data["functional"]["score"],
-            "SEO": data["seo"]["score"],
-            "Budget": data["budget"]["score"],
-            "Dead End": data["dead_end"]["score"]
+            "Technical": data.get("technical", {}).get("score", 0),
+            "Business Info": data.get("business", {}).get("score", 0),
+            "Functional": data.get("functional", {}).get("score", 0),
+            "SEO": data.get("seo", {}).get("score", 0),
+            "Budget": data.get("budget", {}).get("score", 0),
+            "Dead End": data.get("dead_end", {}).get("score", 0)
         }
         worst_category = min(scores, key=scores.get)
-        category_map = {
-            "Technical": "Technical Issues",
-            "Business Info": "Business Info Gaps",
-            "Functional": "Functional Gaps",
-            "SEO": "SEO Weaknesses",
-            "Budget": "Budget Constraints",
-            "Dead End": "Dead End Risks"
-        }
-        pain_points[category_map[worst_category]].append(data["url"])
+        pain_points[category_map[worst_category]].append(data.get("url", "N/A"))
 
     painpoint_data = []
     for category, urls in pain_points.items():
@@ -206,13 +206,13 @@ def main():
         industry = data.get("industry_keyword", "Other")
         industry_data.append({
             "Industry": industry,
-            "Technical": data["technical"]["score"],
-            "Business Info": data["business"]["score"],
-            "Functional": data["functional"]["score"],
-            "SEO": data["seo"]["score"],
-            "Budget": data["budget"]["score"],
-            "Dead End": data["dead_end"]["score"],
-            "Growth Signals": len(data["growth"]["growth_signals"])
+            "Technical": data.get("technical", {}).get("score", 0),
+            "Business Info": data.get("business", {}).get("score", 0),
+            "Functional": data.get("functional", {}).get("score", 0),
+            "SEO": data.get("seo", {}).get("score", 0),
+            "Budget": data.get("budget", {}).get("score", 0),
+            "Dead End": data.get("dead_end", {}).get("score", 0),
+            "Growth Signals": len(data.get("growth", {}).get("growth_signals", []))
         })
     if industry_data:
         industry_df = pd.DataFrame(industry_data)
@@ -229,14 +229,14 @@ def main():
         trend_data = []
         for domain, data in recent_entries.items():
             trend_data.append({
-                "Date": data["audit_date"],
-                "URL": data["url"],
-                "Technical": data["technical"]["score"],
-                "Business Info": data["business"]["score"],
-                "Functional": data["functional"]["score"],
-                "SEO": data["seo"]["score"],
-                "Budget": data["budget"]["score"],
-                "Dead End": data["dead_end"]["score"]
+                "Date": data.get("audit_date", data.get("timestamp", "N/A")),
+                "URL": data.get("url", "N/A"),
+                "Technical": data.get("technical", {}).get("score", 0),
+                "Business Info": data.get("business", {}).get("score", 0),
+                "Functional": data.get("functional", {}).get("score", 0),
+                "SEO": data.get("seo", {}).get("score", 0),
+                "Budget": data.get("budget", {}).get("score", 0),
+                "Dead End": data.get("dead_end", {}).get("score", 0)
             })
         trend_df = pd.DataFrame(trend_data)
         if not trend_df.empty:
@@ -252,16 +252,16 @@ def main():
         last_10_data = []
         for domain, data in last_10_entries.items():
             last_10_data.append({
-                "URL": data["url"],
-                "Date": data["audit_date"],
-                "Industry": data["industry_keyword"],
-                "Technical": data["technical"]["score"],
-                "Business Info": data["business"]["score"],
-                "Functional": data["functional"]["score"],
-                "SEO": data["seo"]["score"],
-                "Budget": data["budget"]["score"],
-                "Dead End": data["dead_end"]["score"],
-                "Growth Signals": ", ".join(data["growth"]["growth_signals"]) if data["growth"]["growth_signals"] else "None"
+                "URL": data.get("url", "N/A"),
+                "Date": data.get("audit_date", data.get("timestamp", "N/A")),
+                "Industry": data.get("industry_keyword", "Other"),
+                "Technical": format_score(data.get("technical", {}).get("score", 0)),
+                "Business Info": format_score(data.get("business", {}).get("score", 0)),
+                "Functional": format_score(data.get("functional", {}).get("score", 0)),
+                "SEO": format_score(data.get("seo", {}).get("score", 0)),
+                "Budget": format_score(data.get("budget", {}).get("score", 0)),
+                "Dead End": format_score(data.get("dead_end", {}).get("score", 0)),
+                "Growth Signals": ", ".join(data.get("growth", {}).get("growth_signals", [])) or "None"
             })
         last_10_df = pd.DataFrame(last_10_data)
         st.dataframe(last_10_df, use_container_width=True)
@@ -309,15 +309,15 @@ def main():
     }
     for domain, data in cache.items():
         scores = {
-            "Technical": data["technical"]["score"],
-            "Business Info": data["business"]["score"],
-            "Functional": data["functional"]["score"],
-            "SEO": data["seo"]["score"],
-            "Budget": data["budget"]["score"],
-            "Dead End": data["dead_end"]["score"]
+            "Technical": data.get("technical", {}).get("score", 0),
+            "Business Info": data.get("business", {}).get("score", 0),
+            "Functional": data.get("functional", {}).get("score", 0),
+            "SEO": data.get("seo", {}).get("score", 0),
+            "Budget": data.get("budget", {}).get("score", 0),
+            "Dead End": data.get("dead_end", {}).get("score", 0)
         }
         worst_category = min(scores, key=scores.get)
-        pain_points[category_map[worst_category]].append(data["url"])
+        pain_points[category_map[worst_category]].append(data.get("url", "N/A"))
 
     for category, urls in pain_points.items():
         if urls:
