@@ -30,6 +30,9 @@ LOCAL_AUDIT_CSV = LOCAL_CACHE_DIR / "audits.csv"
 LOCAL_WHOIS_CSV = LOCAL_WHOIS_CACHE_DIR / "whois.csv"
 GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_WHOIS_CSV_URL = f"{GITHUB_RAW_BASE}/whois_cache/whois.csv"
+CACHE_CLEANUP_DAYS = 90
+BATCH_SIZE = 10 
+WHOIS_RETRIES = 2  
 
 # Ensure directories exist
 for directory in [LOCAL_CACHE_DIR, LOCAL_WHOIS_CACHE_DIR]:
