@@ -203,12 +203,15 @@ def generate_full_csv(cache, include_benchmarks=False):
 
         for category in ["technical", "business", "functional", "seo", "budget"]:
             for check_name, check_data in data.get(category, {}).get("checks", {}).items():
+                # Get original status and issue
+                status = check_data.get("status", "N/A")
+                issue = check_data.get("issue", "No issues")
+
                 # Correct status for specific checks
-                status = check_data.get('status', 'N/A')
-                if check_name in ['flash_elements', 'outdated_plugins'] and status == 'Good':
+                if check_name in ['flash_elements', 'outdated_plugins'] and 'detected' in issue.lower():
                     status = 'Needs improvement'
-                elif check_name == 'ssl_tls' and status == 'Good':
-                    status = 'Critical' if not data.get('crawl', {}).get('ssl_valid', True) else 'Good'
+                elif check_name == 'ssl_tls' and not data.get('crawl', {}).get('ssl_valid', True):
+                    status = 'Critical'
 
                 csv_data.append({
                     "page_url": url,
@@ -220,12 +223,12 @@ def generate_full_csv(cache, include_benchmarks=False):
                               "SEO & Visibility" if category == "seo" else
                               "Budget & Resources",
                     "check": check_name.replace("_", " ").title(),
-                    "status": status,
-                    "what_i_found": check_data.get("issue", "No issues"),
+                    "status": status,  # Use corrected status
+                    "what_i_found": issue,
                     "why_it_matters": get_why_it_matters(category, check_name) if status != "Good" else "",
                     "recommendation": get_recommendation(category, check_name) if status != "Good" else "",
                     "business_impact": get_business_impact(category, check_name) if status != "Good" else "",
-                    "priority": check_data.get("status", "N/A"),
+                    "priority": status,  # Use corrected status for priority too
                     "score": data.get(category, {}).get("score", 0),
                     "benchmark": benchmarks.get(category, 70),
                     "vs_benchmark": "Above" if data.get(category, {}).get("score", 0) > benchmarks.get(category, 70) else "Below"

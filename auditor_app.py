@@ -680,8 +680,11 @@ def technical_audit(crawl_result):
     # Flash elements
     flash_elements = soup.find_all("object", type=lambda x: x and "flash" in x.lower())
     flash_elements += soup.find_all("embed", type=lambda x: x and "flash" in x.lower())
-    flash_status = "Good" if not flash_elements else "Critical"
-    checks["flash_elements"] = {"status": flash_status, "issue": "Outdated Flash elements detected"}
+    flash_status = "Good" if not flash_elements else "Needs improvement"  # Changed from Critical
+    checks["flash_elements"] = {
+        "status": flash_status,
+        "issue": "Outdated Flash elements detected" if flash_elements else None
+    }
     if flash_elements:
         score -= SCORE_DEDUCTIONS["flash_elements"]
         issues.append("Outdated Flash elements detected")
@@ -689,10 +692,13 @@ def technical_audit(crawl_result):
     # Outdated plugins
     outdated_plugins = soup.find_all("applet") + soup.find_all("object", type=lambda x: x and ("java" in x.lower() or "silverlight" in x.lower()))
     plugin_status = "Good" if not outdated_plugins else "Needs improvement"
-    checks["outdated_plugins"] = {"status": plugin_status, "issue": "Outdated plugins detected"}
+    checks["outdated_plugins"] = {
+        "status": plugin_status,
+        "issue": "Outdated plugins detected" if outdated_plugins else None
+    }
     if outdated_plugins:
         score -= SCORE_DEDUCTIONS["outdated_plugins"]
-        issues.append("Outdated plugins (Java/Silverlight) detected")
+        issues.append("Outdated plugins detected")
 
     # Broken links (sample first 10)
     internal_links = [a.get("href") for a in soup.find_all("a", href=True) if a.get("href") and a.get("href").startswith(("/", "https://", "http://"))][:10]
