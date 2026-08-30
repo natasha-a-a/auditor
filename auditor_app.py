@@ -44,37 +44,50 @@ for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
 csv.field_size_limit(100000000)  # 100MB
 
 # --- GitHub Auto-Commit Functions ---
-def get_github_token():
-    """Get GitHub token from Streamlit secrets."""
-    return st.secrets.get("GITHUB_TOKEN")
-
-def github_api_request(method, endpoint, data=None):
-    """Make authenticated request to GitHub API."""
-    token = get_github_token()
-    if not token:
-        return None
-
-    url = f"https://api.github.com/repos/{GITHUB_REPO}{endpoint}"
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-
-    try:
-        response = requests.request(method, url, json=data, headers=headers)
-        if response.status_code >= 400:
-            st.error(f"GitHub API Error: {response.status_code} - {response.text}")
-            return None
-        return response.json() if response.content else True
-    except Exception as e:
-        st.error(f"GitHub API request failed: {str(e)}")
-        return None
-
 def commit_to_github(file_path, commit_message):
-    """Commit a file to GitHub automatically with better error handling."""
+    """Commit a file to GitHub with accurate status reporting."""
     token = get_github_token()
     if not token:
-        st.warning("⚠️ GitHub token not configured. Add GITHUB_TOKEN to Streamlit secrets.")
+        st.warning("⚠️ GitHub token not configured. Add GITHUB_TOKEN to secrets.")
+        return False
+
+    relative_path = str(file_path)
+
+    # Read file content
+    try:
+        with open(file_path, "rb") as f:
+            content = f.read()
+        encoded_content = base64.b64encode(content).decode("utf-8")
+    except Exception as e:
+        st.error(f"❌ Failed to read {file_path}: {str(e)}")
+        return False
+
+    # Get current file SHA (for updates)
+    current_file = github_api_request("GET", f"/contents/{relative_path}")
+    file_sha = current_file.get("sha") if current_file else None
+
+    # Prepare commit data
+    data = {
+        "message": commit_message,
+        "content": encoded_content,
+        "branch": GITHUB_BRANCH
+    }
+    if file_sha:
+        data["sha"] = file_sha
+
+    # Commit to GitHub
+    response = github_api_request("PUT", f"/contents/{relative_path}", data)
+
+    # Clear any previous errors
+    if response is None:
+        st.error(f"❌ Failed to commit {relative_path}. Check GitHub token.")
+        return False
+    elif isinstance(response, dict) and "commit" in response:
+        commit_sha = response["commit"]["sha"]
+        st.success(f"✅ **Successfully committed** {relative_path} to GitHub (SHA: {commit_sha[:7]})")
+        return True
+    else:
+        st.error(f"❌ Unexpected GitHub response: {response}")
         return False
 
     # Use file_path as relative path from repo root
