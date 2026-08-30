@@ -1279,40 +1279,40 @@ def main():
                 st.markdown("---")
                 
 # --- BOTTOM SECTION  ---
-endcol1, endcol2, end_col3 = st.columns(3)
+    endcol1, endcol2, end_col3 = st.columns(3)
 
-with endcol1:
-    if st.button("🧹 Clean Up Old Cache Entries"):
-        deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
-        total_deleted = sum(deleted_counts.values())
-        st.success(f"✅ Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days")
+    with endcol1:
+        if st.button("🧹 Clean Up Old Cache Entries"):
+            deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
+            total_deleted = sum(deleted_counts.values())
+            st.success(f"✅ Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days")
 
-# --- BENCHMARK MANAGEMENT  ---
-with endcol2:
-    st.markdown("**Add/Remove Benchmark Websites**")
+    # --- BENCHMARK MANAGEMENT  ---
+    with endcol2:
+        st.markdown("**Add/Remove Benchmark Websites**")
 
-    # Add URLs text area
-    new_urls = st.text_area("Enter URLs to add (one per line):", key="add_urls")
-    if st.button("Add Benchmark Websites", key="add_benchmarks"):
-        if new_urls:
-            new_websites = set(url.strip() for url in new_urls.split('\n') if url.strip())
-            updated_websites = benchmark_websites.union(new_websites)
-            save_benchmark_csv(updated_websites)
-            st.success(f"✅ Added {len(new_websites)} benchmark websites!")
-            st.rerun()
+        # Add URLs text area
+        new_urls = st.text_area("Enter URLs to add (one per line):", key="add_urls")
+        if st.button("Add Benchmark Websites", key="add_benchmarks"):
+            if new_urls:
+                new_websites = set(url.strip() for url in new_urls.split('\n') if url.strip())
+                updated_websites = benchmark_websites.union(new_websites)
+                save_benchmark_csv(updated_websites)
+                st.success(f"✅ Added {len(new_websites)} benchmark websites!")
+                st.rerun()
 
-    # Remove URLs text area
-    remove_urls = st.text_area("Enter URLs to remove (one per line):", key="remove_urls")
-    if st.button("Remove Benchmark Websites", key="remove_benchmarks"):
-        if remove_urls:
-            remove_websites = set(url.strip() for url in remove_urls.split('\n') if url.strip())
-            updated_websites = benchmark_websites - remove_websites
-            save_benchmark_csv(updated_websites)
-            st.success(f"✅ Removed {len(remove_websites)} benchmark websites!")
-            st.rerun()
+        # Remove URLs text area
+        remove_urls = st.text_area("Enter URLs to remove (one per line):", key="remove_urls")
+        if st.button("Remove Benchmark Websites", key="remove_benchmarks"):
+            if remove_urls:
+                remove_websites = set(url.strip() for url in remove_urls.split('\n') if url.strip())
+                updated_websites = benchmark_websites - remove_websites
+                save_benchmark_csv(updated_websites)
+                st.success(f"✅ Removed {len(remove_websites)} benchmark websites!")
+                st.rerun()
 
-with end_col3:
-    st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
+    with end_col3:
+        st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
 
 if __name__ == "__main__":
     main()
