@@ -16,7 +16,7 @@ GITHUB_BRANCH = "main"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
 GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
-GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv"  # NEW: Recommendations CSV
+GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv"  
 
 # --- Helper Functions ---
 def format_score(score, decimals=3):
@@ -44,17 +44,27 @@ def load_benchmark_websites():
     return set(df['url'].tolist())
 
 def load_recommendations():
-    """Load recommendations from CSV (local or GitHub)."""
+    """Load recommendations from CSV (local or GitHub) with error handling."""
     local_path = Path("recommendations.csv")
+
+    # Try local first
     if local_path.exists():
         try:
-            return pd.read_csv(local_path)
-        except Exception:
-            pass
+            return pd.read_csv(local_path, on_bad_lines='warn', quoting=1)  # quoting=1 = QUOTE_ALL
+        except Exception as e:
+            st.warning(f"⚠️ Local recommendations CSV error: {str(e)}")
 
     # Fallback to GitHub
-    df = fetch_csv_from_github(GITHUB_RECOMMENDATIONS_CSV_URL)
-    return df if not df.empty else pd.DataFrame()
+    try:
+        response = requests.get(GITHUB_RECOMMENDATIONS_CSV_URL)
+        if response.status_code == 200:
+            # Clean the text to handle line breaks
+            text = response.text.replace('\r\n', '\n').replace('\r', '\n')
+            return pd.read_csv(io.StringIO(text), on_bad_lines='warn', quoting=1)
+    except Exception as e:
+        st.warning(f"⚠️ GitHub recommendations CSV error: {str(e)}")
+
+    return pd.DataFrame()
 
 def load_github_cache():
     """Load audit cache from GitHub CSV."""
