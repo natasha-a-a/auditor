@@ -71,15 +71,17 @@ def github_api_request(method, endpoint, data=None):
         return None
 
 def commit_to_github(file_path, commit_message):
-    """Commit a file to GitHub automatically."""
+    """Commit a file to GitHub automatically with better error handling."""
     token = get_github_token()
     if not token:
-        st.warning("⚠️ GitHub token not configured. Add GITHUB_TOKEN to secrets.")
+        st.warning("⚠️ GitHub token not configured. Add GITHUB_TOKEN to Streamlit secrets.")
         return False
 
-    # FIX: Convert file_path to string and use directly (no relative_to)
-    # In Streamlit Cloud, file_path is already relative to repo root
+    # Use file_path as relative path from repo root
     relative_path = str(file_path)
+
+    # Debug: Show the path we're trying to access
+    st.write(f"Debug: Attempting to commit to GitHub path: {relative_path}")
 
     # Read file content
     try:
@@ -87,12 +89,11 @@ def commit_to_github(file_path, commit_message):
             content = f.read()
         encoded_content = base64.b64encode(content).decode("utf-8")
     except Exception as e:
-        st.error(f"Failed to read file {file_path}: {str(e)}")
+        st.error(f"❌ Failed to read local file {file_path}: {str(e)}")
         return False
 
-    # Get current file SHA (for updates)
+    # Check if file exists in GitHub (to get SHA for updates)
     current_file = github_api_request("GET", f"/contents/{relative_path}")
-    file_sha = current_file.get("sha") if current_file else None
 
     # Prepare commit data
     data = {
@@ -100,12 +101,29 @@ def commit_to_github(file_path, commit_message):
         "content": encoded_content,
         "branch": GITHUB_BRANCH
     }
-    if file_sha:
-        data["sha"] = file_sha
 
-    # Commit to GitHub
+    # If file exists, include SHA for update
+    if current_file and "sha" in current_file:
+        data["sha"] = current_file["sha"]
+    elif current_file is None:
+        # File doesn't exist - this is OK for new files
+        pass
+    else:
+        st.error(f"❌ Unexpected GitHub API response for {relative_path}: {current_file}")
+        return False
+
+    # Try to commit
     response = github_api_request("PUT", f"/contents/{relative_path}", data)
-    return response is not None
+
+    if response is None:
+        st.error(f"❌ Failed to commit {relative_path} to GitHub. Check token permissions.")
+        return False
+    elif response is True:
+        st.success(f"✅ Successfully committed {relative_path} to GitHub")
+        return True
+    else:
+        st.error(f"❌ GitHub API error: {response}")
+        return False
 
 # --- CSV Helper Functions ---
 def save_to_csv(file_path, data):
