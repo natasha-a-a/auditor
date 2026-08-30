@@ -1,77 +1,61 @@
 import streamlit as st
 import pandas as pd
 import json
-import csv
+import requests
 from pathlib import Path
 from datetime import datetime, timedelta
 import plotly.express as px
-import os
+import io
 
-# Increase CSV field size limit FIRST (before any CSV operations)
-csv.field_size_limit(100000000)  # 100MB
+# --- GitHub Repository Configuration (MUST MATCH auditor_app.py) ---
+GITHUB_REPO = "natasha-a-a/auditor"  # REPLACE WITH YOUR REPO
+GITHUB_BRANCH = "main"  # or your branch name
+GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
+GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
+GITHUB_WHOIS_CSV_URL = f"{GITHUB_RAW_BASE}/whois_cache/whois.csv"
 
-# --- Constants (MUST MATCH auditor_app.py) ---
-BASE_DIR = Path("/mount/src") if os.path.exists("/mount/src") else Path.cwd()
-CACHE_DIR = BASE_DIR / "audit_cache"
-WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
-AUDIT_CSV = CACHE_DIR / "audits.csv"
-WHOIS_CSV = WHOIS_CACHE_DIR / "whois.csv"
-CACHE_CLEANUP_DAYS = 90
+# --- CSV Helper Functions (Fetch from GitHub) ---
+def fetch_csv_from_github(url):
+    """Fetch CSV file directly from GitHub raw URL."""
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return pd.read_csv(io.StringIO(response.text))
+    except requests.exceptions.RequestException as e:
+        st.warning(f"⚠️ Could not fetch {url}: {str(e)}")
+        return pd.DataFrame()
 
-# Ensure directories exist
-for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
-    directory.mkdir(exist_ok=True)
-
-# --- CSV Helper Functions (MUST MATCH auditor_app.py) ---
-def save_to_csv(file_path, data):
-    """Save dictionary data to CSV, replacing existing entries (no duplicates)."""
-    file_path.parent.mkdir(exist_ok=True)
-    existing_data = {}
-    if file_path.exists():
-        existing_data = load_from_csv(file_path)
-    existing_data.update(data)
-    with open(file_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=["domain", "data", "timestamp"])
-        writer.writeheader()
-        for domain, value in existing_data.items():
-            writer.writerow({
-                "domain": domain,
-                "data": json.dumps(value),
-                "timestamp": value.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            })
-
-def load_from_csv(file_path):
-    """Load CSV data into a dictionary with timestamp."""
-    if not file_path.exists():
+def load_github_cache():
+    """Load audit cache from GitHub CSV."""
+    df = fetch_csv_from_github(GITHUB_AUDIT_CSV_URL)
+    if df.empty:
         return {}
-    with open(file_path, mode='r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        return {
-            row["domain"]: {
-                **json.loads(row["data"]),
-                "timestamp": row["timestamp"]
-            }
-            for row in reader
+    return {
+        row["domain"]: {
+            **json.loads(row["data"]),
+            "timestamp": row["timestamp"]
         }
+        for _, row in df.iterrows()
+    }
 
-def load_cache():
-    """Load audit cache from CSV."""
-    return load_from_csv(AUDIT_CSV)
+# --- Main Dashboard App ---
+def main():
+    st.set_page_config(page_title="Paw à Peau Audit Dashboard", layout="wide", page_icon="📊")
+    st.title("📊 Paw à Peau Website Audit Dashboard")
 
-def save_cache(cache):
-    """Save audit cache to CSV (updates existing entries)."""
-    for domain, data in cache.items():
-        if "timestamp" not in data:
-            data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    save_to_csv(AUDIT_CSV, cache)
+    # Debug: Show GitHub URLs
+    st.write(f"🔗 Fetching audits from: {GITHUB_AUDIT_CSV_URL}")
+    st.write(f"🔗 Fetching WHOIS from: {GITHUB_WHOIS_CSV_URL}")
 
-def load_whois_cache():
-    """Load WHOIS cache from CSV."""
-    return load_from_csv(WHOIS_CSV)
+    # Manual refresh button
+    if st.button("🔄 Refresh Data from GitHub"):
+        st.rerun()
 
-def save_whois_cache(cache):
-    """Save WHOIS cache to CSV (updates existing entries)."""
-    save_to_csv(WHOIS_CSV, cache)
+    # Load cache from GitHub
+    cache = load_github_cache()
+    if not cache:
+        st.warning("⚠️ No audit data found. Run the auditor app and commit CSV files to GitHub first.")
+        st.stop()
 
 # --- Data Processing Functions ---
 def filter_recent_entries(cache, days=7):

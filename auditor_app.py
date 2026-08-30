@@ -15,37 +15,34 @@ import whois
 import csv
 import os
 
-# Increase CSV field size limit FIRST (before any CSV operations)
+# Increase CSV field size limit
 csv.field_size_limit(100000000)  # 100MB
 
-# --- Constants ---
-BASE_DIR = Path("/mount/src") if os.path.exists("/mount/src") else Path.cwd()
-CACHE_DIR = BASE_DIR / "audit_cache"
-WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
-AUDIT_CSV = CACHE_DIR / "audits.csv"
-WHOIS_CSV = WHOIS_CACHE_DIR / "whois.csv"
-CACHE_CLEANUP_DAYS = 90
-BATCH_SIZE = 10
-WHOIS_RETRIES = 2
+# --- GitHub Repository Configuration ---
+GITHUB_REPO = "your-username/your-repo"  # REPLACE WITH YOUR REPO
+GITHUB_BRANCH = "main"  # or your branch name
+GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
+
+# --- Constants (Local + GitHub Paths) ---
+LOCAL_CACHE_DIR = Path("audit_cache")
+LOCAL_WHOIS_CACHE_DIR = Path("whois_cache")
+LOCAL_AUDIT_CSV = LOCAL_CACHE_DIR / "audits.csv"
+LOCAL_WHOIS_CSV = LOCAL_WHOIS_CACHE_DIR / "whois.csv"
+GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
+GITHUB_WHOIS_CSV_URL = f"{GITHUB_RAW_BASE}/whois_cache/whois.csv"
 
 # Ensure directories exist
-for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
+for directory in [LOCAL_CACHE_DIR, LOCAL_WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
 
-# --- Optimized CSV Helper Functions ---
+# --- CSV Helper Functions ---
 def save_to_csv(file_path, data):
-    """Save dictionary data to CSV, replacing existing entries (no duplicates)."""
+    """Save dictionary data to local CSV (for GitHub commit)."""
     file_path.parent.mkdir(exist_ok=True)
-
-    # Load existing data
     existing_data = {}
     if file_path.exists():
         existing_data = load_from_csv(file_path)
-
-    # Update with new data (replaces existing domains)
     existing_data.update(data)
-
-    # Write complete dataset back to CSV
     with open(file_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=["domain", "data", "timestamp"])
         writer.writeheader()
@@ -57,7 +54,7 @@ def save_to_csv(file_path, data):
             })
 
 def load_from_csv(file_path):
-    """Load CSV data into a dictionary with timestamp."""
+    """Load local CSV data into a dictionary."""
     if not file_path.exists():
         return {}
     with open(file_path, mode='r', encoding='utf-8') as f:
@@ -65,30 +62,31 @@ def load_from_csv(file_path):
         return {
             row["domain"]: {
                 **json.loads(row["data"]),
-                "timestamp": row["timestamp"]  # Include timestamp in loaded data
+                "timestamp": row["timestamp"]
             }
             for row in reader
         }
 
 def load_cache():
-    """Load audit cache from CSV."""
-    return load_from_csv(AUDIT_CSV)
+    """Load audit cache from LOCAL CSV."""
+    return load_from_csv(LOCAL_AUDIT_CSV)
 
 def save_cache(cache):
-    """Save audit cache to CSV (updates existing entries)."""
-    # Add timestamp to each entry if missing
+    """Save audit cache to LOCAL CSV (user must commit to GitHub)."""
     for domain, data in cache.items():
         if "timestamp" not in data:
             data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    save_to_csv(AUDIT_CSV, cache)
+    save_to_csv(LOCAL_AUDIT_CSV, cache)
+    st.info(f"✅ Data saved to {LOCAL_AUDIT_CSV}. **Please commit to GitHub:** `git add audit_cache/ && git commit -m 'Update audit data'`")
 
 def load_whois_cache():
-    """Load WHOIS cache from CSV."""
-    return load_from_csv(WHOIS_CSV)
+    """Load WHOIS cache from LOCAL CSV."""
+    return load_from_csv(LOCAL_WHOIS_CSV)
 
 def save_whois_cache(cache):
-    """Save WHOIS cache to CSV (updates existing entries)."""
-    save_to_csv(WHOIS_CSV, cache)
+    """Save WHOIS cache to LOCAL CSV (user must commit to GitHub)."""
+    save_to_csv(LOCAL_WHOIS_CSV, cache)
+    st.info(f"✅ WHOIS data saved to {LOCAL_WHOIS_CSV}. **Please commit to GitHub:** `git add whois_cache/ && git commit -m 'Update WHOIS data'`")
 
 def cleanup_old_cache_entries(days=90):
     """Remove cache entries older than `days` days from CSV."""
