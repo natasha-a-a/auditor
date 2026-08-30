@@ -77,17 +77,17 @@ def commit_to_github(file_path, commit_message):
         st.warning("⚠️ GitHub token not configured. Add GITHUB_TOKEN to secrets.")
         return False
 
-    # Read and encode file content
+    # Use file_path as relative path directly
+    relative_path = str(file_path)
+
+    # Rest of the function remains the same...
     with open(file_path, "rb") as f:
         content = f.read()
     encoded_content = base64.b64encode(content).decode("utf-8")
 
-    # Get current file SHA for updates
-    relative_path = str(file_path.relative_to(Path.cwd()))
     current_file = github_api_request("GET", f"/contents/{relative_path}")
     file_sha = current_file.get("sha") if current_file else None
 
-    # Prepare commit data
     data = {
         "message": commit_message,
         "content": encoded_content,
@@ -96,7 +96,6 @@ def commit_to_github(file_path, commit_message):
     if file_sha:
         data["sha"] = file_sha
 
-    # Commit to GitHub
     return github_api_request("PUT", f"/contents/{relative_path}", data) is not None
 
 # --- CSV Helper Functions ---
