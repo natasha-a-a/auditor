@@ -16,6 +16,7 @@ GITHUB_BRANCH = "main"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
 GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
+GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv"  # NEW: Recommendations CSV
 
 # --- Helper Functions ---
 def format_score(score, decimals=3):
@@ -41,6 +42,19 @@ def load_benchmark_websites():
     if df.empty:
         return set()
     return set(df['url'].tolist())
+
+def load_recommendations():
+    """Load recommendations from CSV (local or GitHub)."""
+    local_path = Path("recommendations.csv")
+    if local_path.exists():
+        try:
+            return pd.read_csv(local_path)
+        except Exception:
+            pass
+
+    # Fallback to GitHub
+    df = fetch_csv_from_github(GITHUB_RECOMMENDATIONS_CSV_URL)
+    return df if not df.empty else pd.DataFrame()
 
 def load_github_cache():
     """Load audit cache from GitHub CSV."""
@@ -83,6 +97,39 @@ def extract_contact_info(html, url):
     physical_address = address_match.group(0) if address_match else None
 
     return contact_email, physical_address
+
+# Load recommendations at startup
+RECOMMENDATIONS_DF = load_recommendations()
+
+def get_why_it_matters(category, check_name):
+    """Get why it matters text from CSV data."""
+    filtered = RECOMMENDATIONS_DF[
+        (RECOMMENDATIONS_DF['category'] == category) &
+        (RECOMMENDATIONS_DF['check_name'] == check_name)
+    ]
+    if not filtered.empty:
+        return filtered.iloc[0]['business_impact']
+    return "Important for overall performance"
+
+def get_recommendation(category, check_name):
+    """Get recommendation text from CSV data."""
+    filtered = RECOMMENDATIONS_DF[
+        (RECOMMENDATIONS_DF['category'] == category) &
+        (RECOMMENDATIONS_DF['check_name'] == check_name)
+    ]
+    if not filtered.empty:
+        return filtered.iloc[0]['recommendation']
+    return "Consider improvements for better results"
+
+def get_business_impact(category, check_name):
+    """Get business impact from CSV data."""
+    filtered = RECOMMENDATIONS_DF[
+        (RECOMMENDATIONS_DF['category'] == category) &
+        (RECOMMENDATIONS_DF['check_name'] == check_name)
+    ]
+    if not filtered.empty:
+        return filtered.iloc[0]['business_impact']
+    return "Improving this aspect will enhance your digital presence and business results"
 
 # --- Data Processing Functions ---
 def filter_user_audits(cache):
@@ -127,8 +174,8 @@ def generate_full_csv(cache, include_benchmarks=False):
                     "check": check_name.replace("_", " ").title(),
                     "status": check_data.get("status", "N/A"),
                     "what_i_found": check_data.get("issue", "No issues"),
-                    "why_it_matters": get_why_it_matters(category, check_data.get("status")),
-                    "recommendation": get_recommendation(category, check_data.get("status")),
+                    "why_it_matters": get_why_it_matters(category, check_name),
+                    "recommendation": get_recommendation(category, check_name),
                     "business_impact": get_business_impact(category, check_name),
                     "priority": check_data.get("status", "N/A"),
                     "score": data.get(category, {}).get("score", 0),
@@ -145,9 +192,9 @@ def generate_full_csv(cache, include_benchmarks=False):
                 "check": check_name.replace("_", " ").title(),
                 "status": check_data.get("status", "N/A"),
                 "what_i_found": check_data.get("issue", "No issues"),
-                "why_it_matters": "Critical for business continuity" if check_data.get("status") == "Critical" else "No immediate risk",
-                "recommendation": "Renew domain immediately" if check_data.get("status") == "Critical" else "Monitor domain status",
-                "business_impact": "Prevents business disruption" if check_data.get("status") == "Critical" else "No immediate impact",
+                "why_it_matters": get_why_it_matters("dead_end", check_name),
+                "recommendation": get_recommendation("dead_end", check_name),
+                "business_impact": get_business_impact("dead_end", check_name),
                 "priority": check_data.get("status", "N/A"),
                 "score": data.get("dead_end", {}).get("score", 0),
                 "benchmark": 100,
@@ -211,83 +258,6 @@ def generate_painpoint_csv_with_contact(cache):
         })
 
     return pd.DataFrame(painpoint_data)
-
-def get_why_it_matters(category, status):
-    """Get why it matters text based on category and status."""
-    if status == "Critical":
-        return {
-            "technical": "Critical for security and site stability",
-            "business": "Critical for trust and credibility",
-            "functional": "Critical for conversions and user experience",
-            "seo": "Critical for search visibility and traffic",
-            "budget": "Indicates high risk of digital failure"
-        }.get(category, "Important for overall performance")
-    return {
-        "technical": "Improves site robustness and user experience",
-        "business": "Enhances credibility and customer trust",
-        "functional": "Boosts user engagement and conversions",
-        "seo": "Increases organic search visibility",
-        "budget": "Supports sustainable digital growth"
-    }.get(category, "Contributes to better performance")
-
-def get_recommendation(category, status):
-    """Get recommendation text based on category and status."""
-    if status == "Critical":
-        return {
-            "technical": "Fix immediately to prevent security breaches or downtime",
-            "business": "Add missing information to build trust",
-            "functional": "Implement missing functionality to improve conversions",
-            "seo": "Optimize immediately to regain search visibility",
-            "budget": "Invest in digital presence to avoid failure"
-        }.get(category, "Address this issue urgently")
-    return {
-        "technical": "Review and improve for better performance",
-        "business": "Enhance to strengthen credibility",
-        "functional": "Consider adding to improve user experience",
-        "seo": "Optimize for better search rankings",
-        "budget": "Plan for future digital investments"
-    }.get(category, "Consider improvements")
-
-def get_business_impact(category, check_name):
-    """Get business impact explanation for each check."""
-    impacts = {
-        "technical": {
-            "slow_load_time": "Faster load times reduce bounce rates by up to 50% and improve conversion rates by 7%",
-            "mobile_unfriendly": "Mobile-optimized sites see 2x higher conversion rates from mobile users",
-            "broken_links": "Each broken link costs potential customers and harms SEO rankings",
-            "no_ssl": "HTTPS sites rank higher in search and build user trust",
-            "outdated_tech": "Modern frameworks improve performance, security, and maintainability"
-        },
-        "business": {
-            "no_contact_info": "Clear contact info increases lead generation by 40%",
-            "no_about_page": "About pages build trust and improve conversion rates by 30%",
-            "no_testimonials": "Testimonials increase conversions by 34% on average",
-            "no_case_studies": "Case studies help close 70% more deals",
-            "no_team_page": "Team pages humanize your brand and build credibility"
-        },
-        "functional": {
-            "no_contact_form": "Contact forms generate 5-10x more leads than email links",
-            "no_rfq": "RFQ forms qualify leads and increase sales by 20%",
-            "no_ecommerce": "E-commerce enables 24/7 sales without staff",
-            "no_blog": "Blogs generate 55% more website visitors",
-            "no_appointment": "Online booking increases appointments by 40%"
-        },
-        "seo": {
-            "no_meta_tags": "Proper meta tags improve click-through rates by 30%",
-            "no_alt_text": "Alt text improves accessibility and SEO rankings",
-            "no_sitemap": "Sitemaps help search engines index your site 50% faster",
-            "poor_keywords": "Targeted keywords increase organic traffic by 100-200%",
-            "no_backlinks": "Quality backlinks improve search rankings significantly"
-        },
-        "budget": {
-            "diy_website": "Professional sites convert 2-3x better than DIY solutions",
-            "no_updates": "Regular updates prevent security vulnerabilities and improve performance",
-            "no_analytics": "Analytics data helps optimize marketing spend by 20-30%",
-            "no_seo_investment": "SEO provides the best long-term ROI of any marketing channel",
-            "no_paid_ads": "Paid ads can generate immediate traffic while SEO builds"
-        }
-    }
-    return impacts.get(category, {}).get(check_name, "Improving this aspect will enhance your digital presence and business results")
 
 def calculate_statistics(scores):
     """Calculate basic statistics for a list of scores."""
@@ -363,8 +333,8 @@ def main():
                         st.markdown(f"**{check_name.replace('_', ' ').title()}**")
                         st.write(f"- **Status:** {check_data.get('status', 'N/A')}")
                         st.write(f"- **What I Found:** {check_data.get('issue', 'No issues')}")
-                        st.write(f"- **Why It Matters:** {get_why_it_matters(cat_key, check_data.get('status'))}")
-                        st.write(f"- **Recommendation:** {get_recommendation(cat_key, check_data.get('status'))}")
+                        st.write(f"- **Why It Matters:** {get_why_it_matters(cat_key, check_name)}")
+                        st.write(f"- **Recommendation:** {get_recommendation(cat_key, check_name)}")
                         st.write(f"- **Business Impact:** {get_business_impact(cat_key, check_name)}")
                         st.markdown("---")
                 else:
