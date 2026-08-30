@@ -1277,16 +1277,19 @@ def main():
                     st.warning("⚠️ **No Growth Signals Detected**")
 
                 st.markdown("---")
-                # --- BOTTOM SECTION  ---
-                endcol1, end_col2, end_col3 = st.columns(3)
-                with endcol1:
+                
+                
+    st.markdown("---")
+# --- BOTTOM SECTION  ---
+    endcol1, end_col2, end_col3 = st.columns(3)
+    with endcol1:
                     if st.button("🧹 Clean Up Old Cache Entries"):
                         deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
                         total_deleted = sum(deleted_counts.values())
                         st.success(f"✅ Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days")
 
                 # --- BENCHMARK MANAGEMENT  ---
-                with end_col2:
+    with end_col2:
                     st.markdown("**Add/Remove Benchmark Websites**")
                     new_urls = st.text_area("Enter URLs to add (one per line):")
                     if st.button("Add Benchmark Websites"):
@@ -1305,11 +1308,8 @@ def main():
                                             save_benchmark_csv(updated_websites)
                                             st.success(f"✅ Removed {len(remove_websites)} benchmark websites!")
                                             st.rerun()
-                with end_col3:
+    with end_col3:
                     st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
-                
-    st.markdown("---")
-
 
 
 if __name__ == "__main__":
