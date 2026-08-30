@@ -77,17 +77,24 @@ def commit_to_github(file_path, commit_message):
         st.warning("⚠️ GitHub token not configured. Add GITHUB_TOKEN to secrets.")
         return False
 
-    # Use file_path as relative path directly
+    # FIX: Convert file_path to string and use directly (no relative_to)
+    # In Streamlit Cloud, file_path is already relative to repo root
     relative_path = str(file_path)
 
-    # Rest of the function remains the same...
-    with open(file_path, "rb") as f:
-        content = f.read()
-    encoded_content = base64.b64encode(content).decode("utf-8")
+    # Read file content
+    try:
+        with open(file_path, "rb") as f:
+            content = f.read()
+        encoded_content = base64.b64encode(content).decode("utf-8")
+    except Exception as e:
+        st.error(f"Failed to read file {file_path}: {str(e)}")
+        return False
 
+    # Get current file SHA (for updates)
     current_file = github_api_request("GET", f"/contents/{relative_path}")
     file_sha = current_file.get("sha") if current_file else None
 
+    # Prepare commit data
     data = {
         "message": commit_message,
         "content": encoded_content,
@@ -96,7 +103,9 @@ def commit_to_github(file_path, commit_message):
     if file_sha:
         data["sha"] = file_sha
 
-    return github_api_request("PUT", f"/contents/{relative_path}", data) is not None
+    # Commit to GitHub
+    response = github_api_request("PUT", f"/contents/{relative_path}", data)
+    return response is not None
 
 # --- CSV Helper Functions ---
 def save_to_csv(file_path, data):
