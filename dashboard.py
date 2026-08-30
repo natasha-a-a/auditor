@@ -7,9 +7,9 @@ from datetime import datetime, timedelta
 import plotly.express as px
 import io
 
-# --- GitHub Repository Configuration (MUST MATCH auditor_app.py) ---
-GITHUB_REPO = "natasha-a-a/auditor"  # REPLACE WITH YOUR REPO
-GITHUB_BRANCH = "main"  # or your branch name
+# --- Constants (MUST MATCH auditor_app.py) ---
+GITHUB_REPO = "natasha-a-a/auditor"
+GITHUB_BRANCH = "main"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
 GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_WHOIS_CSV_URL = f"{GITHUB_RAW_BASE}/whois_cache/whois.csv"
@@ -37,25 +37,6 @@ def load_github_cache():
         }
         for _, row in df.iterrows()
     }
-
-# --- Main Dashboard App ---
-def main():
-    st.set_page_config(page_title="Paw à Peau Audit Dashboard", layout="wide", page_icon="📊")
-    st.title("📊 Paw à Peau Website Audit Dashboard")
-
-    # Debug: Show GitHub URLs
-    st.write(f"🔗 Fetching audits from: {GITHUB_AUDIT_CSV_URL}")
-    st.write(f"🔗 Fetching WHOIS from: {GITHUB_WHOIS_CSV_URL}")
-
-    # Manual refresh button
-    if st.button("🔄 Refresh Data from GitHub"):
-        st.rerun()
-
-    # Load cache from GitHub
-    cache = load_github_cache()
-    if not cache:
-        st.warning("⚠️ No audit data found. Run the auditor app and commit CSV files to GitHub first.")
-        st.stop()
 
 # --- Data Processing Functions ---
 def filter_recent_entries(cache, days=7):
@@ -175,18 +156,16 @@ def generate_painpoint_csv(cache):
             "Dead End": data["dead_end"]["score"]
         }
         worst_category = min(scores, key=scores.get)
-        if worst_category == "Technical":
-            pain_points["Technical Issues"].append(data["url"])
-        elif worst_category == "Business Info":
-            pain_points["Business Info Gaps"].append(data["url"])
-        elif worst_category == "Functional":
-            pain_points["Functional Gaps"].append(data["url"])
-        elif worst_category == "SEO":
-            pain_points["SEO Weaknesses"].append(data["url"])
-        elif worst_category == "Budget":
-            pain_points["Budget Constraints"].append(data["url"])
-        elif worst_category == "Dead End":
-            pain_points["Dead End Risks"].append(data["url"])
+        category_map = {
+            "Technical": "Technical Issues",
+            "Business Info": "Business Info Gaps",
+            "Functional": "Functional Gaps",
+            "SEO": "SEO Weaknesses",
+            "Budget": "Budget Constraints",
+            "Dead End": "Dead End Risks"
+        }
+        pain_points[category_map[worst_category]].append(data["url"])
+
     painpoint_data = []
     for category, urls in pain_points.items():
         for url in urls:
@@ -198,19 +177,19 @@ def main():
     st.set_page_config(page_title="Paw à Peau Audit Dashboard", layout="wide", page_icon="📊")
     st.title("📊 Paw à Peau Website Audit Dashboard")
 
-    # Debug: Show CSV paths
-    st.write(f"📁 Looking for audits at: {AUDIT_CSV.absolute()}")
-    st.write(f"📁 CSV exists: {AUDIT_CSV.exists()}")
-
-    # Auto-refresh cache
-    cache = load_cache()
-    if not cache:
-        st.warning("⚠️ No audit data found. Run the auditor app first to generate data.")
-        st.stop()
+    # Debug: Show GitHub URLs
+    st.write(f"🔗 Fetching audits from: {GITHUB_AUDIT_CSV_URL}")
+    st.write(f"🔗 Fetching WHOIS from: {GITHUB_WHOIS_CSV_URL}")
 
     # Manual refresh button
-    if st.button("🔄 Refresh Data"):
+    if st.button("🔄 Refresh Data from GitHub"):
         st.rerun()
+
+    # Load cache from GitHub
+    cache = load_github_cache()
+    if not cache:
+        st.warning("⚠️ No audit data found. Run the auditor app and commit CSV files to GitHub first.")
+        st.stop()
 
     st.markdown("""
     **Overview:**
@@ -320,6 +299,14 @@ def main():
         "Budget Constraints": [],
         "Dead End Risks": []
     }
+    category_map = {
+        "Technical": "Technical Issues",
+        "Business Info": "Business Info Gaps",
+        "Functional": "Functional Gaps",
+        "SEO": "SEO Weaknesses",
+        "Budget": "Budget Constraints",
+        "Dead End": "Dead End Risks"
+    }
     for domain, data in cache.items():
         scores = {
             "Technical": data["technical"]["score"],
@@ -330,18 +317,7 @@ def main():
             "Dead End": data["dead_end"]["score"]
         }
         worst_category = min(scores, key=scores.get)
-        if worst_category == "Technical":
-            pain_points["Technical Issues"].append(data["url"])
-        elif worst_category == "Business Info":
-            pain_points["Business Info Gaps"].append(data["url"])
-        elif worst_category == "Functional":
-            pain_points["Functional Gaps"].append(data["url"])
-        elif worst_category == "SEO":
-            pain_points["SEO Weaknesses"].append(data["url"])
-        elif worst_category == "Budget":
-            pain_points["Budget Constraints"].append(data["url"])
-        elif worst_category == "Dead End":
-            pain_points["Dead End Risks"].append(data["url"])
+        pain_points[category_map[worst_category]].append(data["url"])
 
     for category, urls in pain_points.items():
         if urls:
