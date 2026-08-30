@@ -14,13 +14,15 @@ from firecrawl import FirecrawlApp
 import whois
 import csv
 import os
+import base64
+import requests
 
 # Increase CSV field size limit
 csv.field_size_limit(100000000)  # 100MB
 
 # --- GitHub Repository Configuration ---
-GITHUB_REPO = "your-username/your-repo"  # REPLACE WITH YOUR REPO
-GITHUB_BRANCH = "main"  # or your branch name
+GITHUB_REPO = "natasha-a-a/auditor"  
+GITHUB_BRANCH = "main" 
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
 
 # --- Constants (Local + GitHub Paths) ---
@@ -38,14 +40,79 @@ WHOIS_RETRIES = 2
 for directory in [LOCAL_CACHE_DIR, LOCAL_WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
 
+
+# --- GitHub Auto-Commit Functions ---
+def get_github_token():
+    """Get GitHub token from Streamlit secrets."""
+    return st.secrets.get("GITHUB_TOKEN")
+
+def github_api_request(method, endpoint, data=None):
+    """Make authenticated request to GitHub API."""
+    token = get_github_token()
+    if not token:
+        return None
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}{endpoint}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    try:
+        if method == "GET":
+            response = requests.get(url, headers=headers)
+        else:
+            response = requests.request(method, url, json=data, headers=headers)
+
+        if response.status_code >= 400:
+            st.error(f"GitHub API Error: {response.status_code} - {response.text}")
+            return None
+
+        return response.json() if response.content else True
+    except Exception as e:
+        st.error(f"GitHub API request failed: {str(e)}")
+        return None
+
+def commit_to_github(file_path, commit_message):
+    """Commit a file to GitHub automatically."""
+    token = get_github_token()
+    if not token:
+        st.warning("⚠️ GitHub token not configured. Add GITHUB_TOKEN to secrets.")
+        return False
+
+    # Read file content
+    with open(file_path, "rb") as f:
+        content = f.read()
+    encoded_content = base64.b64encode(content).decode("utf-8")
+
+    # Get current file SHA (for updates)
+    relative_path = str(file_path.relative_to(Path.cwd()))
+    current_file = github_api_request("GET", f"/contents/{relative_path}")
+    file_sha = current_file.get("sha") if current_file else None
+
+    # Prepare commit data
+    data = {
+        "message": commit_message,
+        "content": encoded_content,
+        "branch": GITHUB_BRANCH
+    }
+    if file_sha:
+        data["sha"] = file_sha  # Required for updating existing files
+
+    # Commit to GitHub
+    response = github_api_request("PUT", f"/contents/{relative_path}", data)
+    return response is not None
+
 # --- CSV Helper Functions ---
 def save_to_csv(file_path, data):
-    """Save dictionary data to local CSV (for GitHub commit)."""
+    """Save dictionary data to CSV and auto-commit to GitHub."""
     file_path.parent.mkdir(exist_ok=True)
     existing_data = {}
     if file_path.exists():
         existing_data = load_from_csv(file_path)
     existing_data.update(data)
+
+    # Save locally
     with open(file_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=["domain", "data", "timestamp"])
         writer.writeheader()
@@ -55,6 +122,24 @@ def save_to_csv(file_path, data):
                 "data": json.dumps(value),
                 "timestamp": value.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             })
+
+    # Auto-commit to GitHub
+    commit_message = f"Auto-update {file_path.name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    if commit_to_github(file_path, commit_message):
+        st.success(f"✅ Data saved and **automatically committed to GitHub**: {file_path.name}")
+    else:
+        st.warning(f"⚠️ Data saved locally to {file_path}. Check GitHub token.")
+
+def save_cache(cache):
+    """Save audit cache to CSV and auto-commit to GitHub."""
+    for domain, data in cache.items():
+        if "timestamp" not in data:
+            data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    save_to_csv(AUDIT_CSV, cache)
+
+def save_whois_cache(cache):
+    """Save WHOIS cache to CSV and auto-commit to GitHub."""
+    save_to_csv(WHOIS_CSV, cache)
 
 def load_from_csv(file_path):
     """Load local CSV data into a dictionary."""
@@ -73,23 +158,6 @@ def load_from_csv(file_path):
 def load_cache():
     """Load audit cache from LOCAL CSV."""
     return load_from_csv(LOCAL_AUDIT_CSV)
-
-def save_cache(cache):
-    """Save audit cache to LOCAL CSV (user must commit to GitHub)."""
-    for domain, data in cache.items():
-        if "timestamp" not in data:
-            data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    save_to_csv(LOCAL_AUDIT_CSV, cache)
-    st.info(f"✅ Data saved to {LOCAL_AUDIT_CSV}. **Please commit to GitHub:** `git add audit_cache/ && git commit -m 'Update audit data'`")
-
-def load_whois_cache():
-    """Load WHOIS cache from LOCAL CSV."""
-    return load_from_csv(LOCAL_WHOIS_CSV)
-
-def save_whois_cache(cache):
-    """Save WHOIS cache to LOCAL CSV (user must commit to GitHub)."""
-    save_to_csv(LOCAL_WHOIS_CSV, cache)
-    st.info(f"✅ WHOIS data saved to {LOCAL_WHOIS_CSV}. **Please commit to GitHub:** `git add whois_cache/ && git commit -m 'Update WHOIS data'`")
 
 def cleanup_old_cache_entries(days=90):
     """Remove cache entries older than `days` days from CSV."""
