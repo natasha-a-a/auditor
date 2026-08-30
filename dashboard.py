@@ -13,7 +13,7 @@ GITHUB_REPO = "natasha-a-a/auditor"
 GITHUB_BRANCH = "main"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
 GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
-GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"  # New: Benchmark websites CSV
+GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
 
 # --- Helper Functions ---
 def format_score(score, decimals=3):
@@ -50,7 +50,7 @@ def load_github_cache():
         row["domain"]: {
             **json.loads(row["data"]),
             "timestamp": row["timestamp"],
-            "is_benchmark": row["domain"] in benchmark_websites  # Mark benchmark websites
+            "is_benchmark": row["domain"] in benchmark_websites
         }
         for _, row in df.iterrows()
     }
@@ -59,6 +59,11 @@ def load_github_cache():
 def filter_user_audits(cache):
     """Filter out benchmark websites, return only user-submitted audits."""
     return {k: v for k, v in cache.items() if not v.get("is_benchmark", False)}
+
+def filter_recent_entries(cache, days=7):
+    """Filter cache entries from the last N days."""
+    cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    return {k: v for k, v in cache.items() if v.get("audit_date", v.get("timestamp", "")) >= cutoff_date}
 
 def get_last_n_entries(cache, n=10):
     """Get the last N user-submitted entries from the cache."""
@@ -286,6 +291,7 @@ def main():
         st.warning("⚠️ No audit data found. Run the auditor app and commit CSV files to GitHub first.")
         st.stop()
 
+    # Define user_cache here for all subsequent sections
     user_cache = filter_user_audits(cache)
     if not user_cache:
         st.warning("⚠️ No user-submitted audits found. Only benchmark websites exist in the data.")
@@ -495,7 +501,40 @@ def main():
     st.subheader("🎯 Websites by Primary Pain Point (User Audits Only)")
     painpoint_csv_df = generate_painpoint_csv(cache)
     if not painpoint_csv_df.empty:
-        st.dataframe(painpoint_csv_df, use_container_width=True)
+        # Display as expandable sections
+        pain_points = {
+            "Technical Issues": [],
+            "Business Info Gaps": [],
+            "Functional Gaps": [],
+            "SEO Weaknesses": [],
+            "Budget Constraints": [],
+            "Dead End Risks": []
+        }
+        category_map = {
+            "Technical": "Technical Issues",
+            "Business Info": "Business Info Gaps",
+            "Functional": "Functional Gaps",
+            "SEO": "SEO Weaknesses",
+            "Budget": "Budget Constraints",
+            "Dead End": "Dead End Risks"
+        }
+        for domain, data in user_cache.items():
+            scores = {
+                "Technical": data.get("technical", {}).get("score", 0),
+                "Business Info": data.get("business", {}).get("score", 0),
+                "Functional": data.get("functional", {}).get("score", 0),
+                "SEO": data.get("seo", {}).get("score", 0),
+                "Budget": data.get("budget", {}).get("score", 0),
+                "Dead End": data.get("dead_end", {}).get("score", 0)
+            }
+            worst_category = min(scores, key=scores.get)
+            pain_points[category_map[worst_category]].append(data.get("url", "N/A"))
+
+        for category, urls in pain_points.items():
+            if urls:
+                with st.expander(f"{category} ({len(urls)} websites)"):
+                    for url in urls:
+                        st.write(f"- {url}")
 
 if __name__ == "__main__":
     main()

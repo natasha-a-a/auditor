@@ -1224,19 +1224,39 @@ def main():
                                 for issue in result[category["key"]]["issues"]:
                                     st.write(f"- {issue}")
 
-                # Benchmark comparison table
+                # Benchmark comparison
                 st.markdown("#### 📈 Benchmark Comparison")
                 benchmark_data = {
-                    "Category": [cat["name"] for cat in categories],
-                    "Your Score": [result[cat["key"]]["score"] for cat in categories],
-                    "Industry Benchmark": [result["benchmarks"].get(cat["key"], 70) for cat in categories]
+                    "Category": ["Technical", "Business Info", "Functional", "SEO", "Budget", "Dead End"],
+                    "Analyzed Website Score": [
+                        result["technical"]["score"],
+                        result["business"]["score"],
+                        result["functional"]["score"],
+                        result["seo"]["score"],
+                        result["budget"]["score"],
+                        result["dead_end"]["score"]
+                    ],
+                    "Industry Benchmark": [
+                        result["benchmarks"].get("technical", 70),
+                        result["benchmarks"].get("business", 70),
+                        result["benchmarks"].get("functional", 70),
+                        result["benchmarks"].get("seo", 70),
+                        result["benchmarks"].get("budget", 70),
+                        100
+                    ]
                 }
                 benchmark_df = pd.DataFrame(benchmark_data)
 
-                def highlight_score(s):
-                    return ['background-color: #d4edda' if s.Your_Score > s.Industry_Benchmark else
-                            'background-color: #f8d7da' if s.Your_Score < s.Industry_Benchmark else
-                            '' for _ in s.index]
+                # FIXED highlight function - uses correct column names
+                def highlight_score(row):
+                    score = row['Analyzed Website Score']
+                    benchmark = row['Industry Benchmark']
+                    if score > benchmark:
+                        return ['background-color: #d4edda'] * len(row)
+                    elif score < benchmark:
+                        return ['background-color: #f8d7da'] * len(row)
+                    else:
+                        return [''] * len(row)
 
                 styled_df = benchmark_df.style.apply(highlight_score, axis=1)
                 st.dataframe(styled_df, hide_index=True)
@@ -1257,15 +1277,15 @@ def main():
                 st.markdown("---")
 
    # --- Benchmark Management Section ---
-st.markdown("### 🎯 Benchmark Website Management")
-benchmark_websites = load_benchmark_websites()
+    st.markdown("### 🎯 Benchmark Website Management")
+    benchmark_websites = load_benchmark_websites()
 
-col1, col2 = st.columns(2)
-with col1:
-    st.markdown("**Add Benchmark Websites**")
-    new_urls = st.text_area("Enter URLs to add (one per line):")
-    if st.button("Add Benchmark Websites"):
-        if new_urls:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Add Benchmark Websites**")
+        new_urls = st.text_area("Enter URLs to add (one per line):")
+        if st.button("Add Benchmark Websites"):
+            if new_urls:
                 new_websites = set(url.strip() for url in new_urls.split('\n') if url.strip())
                 updated_websites = benchmark_websites.union(new_websites)
                 save_benchmark_csv(updated_websites)
