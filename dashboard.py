@@ -26,12 +26,12 @@ def format_score(score, decimals=3):
         return formatted.rstrip('0').rstrip('.') if '.' in formatted else formatted
     return str(score)
 
-def fetch_csv_from_github(url):
+def fetch_csv_from_github(url, sep=','):
     """Fetch CSV file directly from GitHub raw URL."""
     try:
         response = requests.get(url)
         response.raise_for_status()
-        return pd.read_csv(io.StringIO(response.text))
+        return pd.read_csv(io.StringIO(response.text), sep=sep)
     except requests.exceptions.RequestException as e:
         st.warning(f"⚠️ Could not fetch {url}: {str(e)}")
         return pd.DataFrame()
@@ -44,30 +44,26 @@ def load_benchmark_websites():
     return set(df['url'].tolist())
 
 def load_recommendations():
-    """Load recommendations from CSV (local or GitHub) with proper error handling."""
+    """Load recommendations from CSV (local or GitHub) with semicolon delimiter."""
     expected_columns = ['industry', 'category', 'check_name', 'business_impact', 'recommendation', 'priority']
     local_path = Path("recommendations.csv")
 
-    # Try local first
+    # Try local first (with semicolon delimiter)
     if local_path.exists():
         try:
-            df = pd.read_csv(local_path)
+            df = pd.read_csv(local_path, sep=';')
             if not df.empty and all(col in df.columns for col in expected_columns):
                 st.info(f"✅ Loaded {len(df)} recommendations from local CSV")
                 return df
         except Exception as e:
             st.warning(f"⚠️ Local recommendations CSV error: {str(e)}")
 
-    # Fallback to GitHub
+    # Fallback to GitHub (with semicolon delimiter)
     try:
-        response = requests.get(GITHUB_RECOMMENDATIONS_CSV_URL)
-        if response.status_code == 200:
-            df = pd.read_csv(io.StringIO(response.text))
-            if not df.empty and all(col in df.columns for col in expected_columns):
-                st.info(f"✅ Loaded {len(df)} recommendations from GitHub CSV")
-                return df
-            else:
-                st.warning(f"⚠️ GitHub recommendations CSV has wrong format. Expected columns: {expected_columns}")
+        df = fetch_csv_from_github(GITHUB_RECOMMENDATIONS_CSV_URL, sep=';')
+        if not df.empty and all(col in df.columns for col in expected_columns):
+            st.info(f"✅ Loaded {len(df)} recommendations from GitHub CSV")
+            return df
     except Exception as e:
         st.warning(f"⚠️ GitHub recommendations CSV error: {str(e)}")
 
