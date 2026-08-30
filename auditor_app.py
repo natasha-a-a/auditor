@@ -1114,18 +1114,9 @@ def main():
     st.markdown("---")
 
     # --- BENCHMARK MANAGEMENT SECTION  ---
-    st.markdown("### 🎯 Benchmark Website Management")
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("**Current Benchmark Websites:**")
-        if benchmark_websites:
-            for url in sorted(benchmark_websites):
-                st.write(f"- {url}")
-        else:
-            st.info("No benchmark websites loaded.")
-
-    with col2:
         st.markdown("**Add/Remove Benchmark Websites**")
         new_urls = st.text_area("Enter URLs to add (one per line):")
         if st.button("Add Benchmark Websites"):
@@ -1136,6 +1127,7 @@ def main():
                 st.success(f"✅ Added {len(new_websites)} benchmark websites!")
                 st.rerun()
 
+    with col2:
         remove_urls = st.text_area("Enter URLs to remove (one per line):")
         if st.button("Remove Benchmark Websites"):
             if remove_urls:
