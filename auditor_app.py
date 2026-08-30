@@ -20,7 +20,6 @@ from firecrawl import FirecrawlApp
 import whois
 
 # --- Constants ---
-# GitHub Configuration
 GITHUB_REPO = "natasha-a-a/auditor"
 GITHUB_BRANCH = "main"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
@@ -44,6 +43,30 @@ for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
 csv.field_size_limit(100000000)  # 100MB
 
 # --- GitHub Auto-Commit Functions ---
+def get_github_token():
+    """Get GitHub token from Streamlit secrets."""
+    return st.secrets.get("GITHUB_TOKEN")
+
+def github_api_request(method, endpoint, data=None):
+    """Make authenticated request to GitHub API."""
+    token = get_github_token()
+    if not token:
+        return None
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}{endpoint}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    try:
+        response = requests.request(method, url, json=data, headers=headers)
+        if response.status_code >= 400:
+            return None
+        return response.json() if response.content else True
+    except Exception:
+        return None
+
 def commit_to_github(file_path, commit_message):
     """Commit a file to GitHub with accurate status reporting."""
     token = get_github_token()
@@ -64,7 +87,7 @@ def commit_to_github(file_path, commit_message):
 
     # Get current file SHA (for updates)
     current_file = github_api_request("GET", f"/contents/{relative_path}")
-    file_sha = current_file.get("sha") if current_file else None
+    file_sha = current_file.get("sha") if isinstance(current_file, dict) else None
 
     # Prepare commit data
     data = {
@@ -78,7 +101,6 @@ def commit_to_github(file_path, commit_message):
     # Commit to GitHub
     response = github_api_request("PUT", f"/contents/{relative_path}", data)
 
-    # Clear any previous errors
     if response is None:
         st.error(f"❌ Failed to commit {relative_path}. Check GitHub token.")
         return False
@@ -88,54 +110,6 @@ def commit_to_github(file_path, commit_message):
         return True
     else:
         st.error(f"❌ Unexpected GitHub response: {response}")
-        return False
-
-    # Use file_path as relative path from repo root
-    relative_path = str(file_path)
-
-    # Debug: Show the path we're trying to access
-    st.write(f"Debug: Attempting to commit to GitHub path: {relative_path}")
-
-    # Read file content
-    try:
-        with open(file_path, "rb") as f:
-            content = f.read()
-        encoded_content = base64.b64encode(content).decode("utf-8")
-    except Exception as e:
-        st.error(f"❌ Failed to read local file {file_path}: {str(e)}")
-        return False
-
-    # Check if file exists in GitHub (to get SHA for updates)
-    current_file = github_api_request("GET", f"/contents/{relative_path}")
-
-    # Prepare commit data
-    data = {
-        "message": commit_message,
-        "content": encoded_content,
-        "branch": GITHUB_BRANCH
-    }
-
-    # If file exists, include SHA for update
-    if current_file and "sha" in current_file:
-        data["sha"] = current_file["sha"]
-    elif current_file is None:
-        # File doesn't exist - this is OK for new files
-        pass
-    else:
-        st.error(f"❌ Unexpected GitHub API response for {relative_path}: {current_file}")
-        return False
-
-    # Try to commit
-    response = github_api_request("PUT", f"/contents/{relative_path}", data)
-
-    if response is None:
-        st.error(f"❌ Failed to commit {relative_path} to GitHub. Check token permissions.")
-        return False
-    elif response is True:
-        st.success(f"✅ Successfully committed {relative_path} to GitHub")
-        return True
-    else:
-        st.error(f"❌ GitHub API error: {response}")
         return False
 
 # --- CSV Helper Functions ---
