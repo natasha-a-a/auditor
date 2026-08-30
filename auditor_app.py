@@ -1270,11 +1270,6 @@ def main():
                 else:
                     st.info("ℹ️ Benchmarks based on **industry standards** (no competitors crawled yet).")
 
-                # Growth signals
-                if result["growth"]["growth_signals"]:
-                    st.success("✅ **Growth Signals Detected:** " + ", ".join(result["growth"]["growth_signals"]))
-                else:
-                    st.warning("⚠️ **No Growth Signals Detected**")
 
                 st.markdown("---")
                 
