@@ -305,7 +305,7 @@ def calculate_statistics(scores):
 # --- Main Dashboard App ---
 def main():
     st.set_page_config(page_title="Paw à Peau Audit Dashboard", layout="wide", page_icon="📊")
-    st.title("📊 Paw à Peau Website Audit Dashboard")
+    st.title("📊 Paw à Peau Audit Dashboard")
 
     # Manual refresh button
     if st.button("🔄 Refresh Data from GitHub"):

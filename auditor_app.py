@@ -1254,11 +1254,11 @@ def main():
                     score = row['Analyzed Website Score']
                     benchmark = row['Industry Benchmark']
                     if score > benchmark:
-                        return ['background-color: #d4edda'] * len(row)
+                        return ['', 'background-color: #006400; color: white;', '']  # Dark green
                     elif score < benchmark:
-                        return ['background-color: #f8d7da'] * len(row)
+                        return ['', 'background-color: #8B0000; color: white;', '']  # Dark red
                     else:
-                        return [''] * len(row)
+                        return ['', '', '']
 
                 styled_df = benchmark_df.style.apply(highlight_score, axis=1)
                 st.dataframe(styled_df, hide_index=True)
