@@ -1113,32 +1113,6 @@ def main():
     # --- SEPARATOR ---
     st.markdown("---")
 
-    # --- BENCHMARK MANAGEMENT SECTION  ---
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Add/Remove Benchmark Websites**")
-        new_urls = st.text_area("Enter URLs to add (one per line):")
-        if st.button("Add Benchmark Websites"):
-            if new_urls:
-                new_websites = set(url.strip() for url in new_urls.split('\n') if url.strip())
-                updated_websites = benchmark_websites.union(new_websites)
-                save_benchmark_csv(updated_websites)
-                st.success(f"✅ Added {len(new_websites)} benchmark websites!")
-                st.rerun()
-
-    with col2:
-        remove_urls = st.text_area("Enter URLs to remove (one per line):")
-        if st.button("Remove Benchmark Websites"):
-            if remove_urls:
-                remove_websites = set(url.strip() for url in remove_urls.split('\n') if url.strip())
-                updated_websites = benchmark_websites - remove_websites
-                save_benchmark_csv(updated_websites)
-                st.success(f"✅ Removed {len(remove_websites)} benchmark websites!")
-                st.rerun()
-
-    st.markdown("---")
-
     # --- AUDIT LOGIC (Triggered by Run Audit Button) ---
     if 'run_audit_clicked' in locals() and run_audit_clicked:
         # Reload benchmark websites in case they were updated
@@ -1303,6 +1277,33 @@ def main():
                     st.warning("⚠️ **No Growth Signals Detected**")
 
                 st.markdown("---")
+
+    # --- BENCHMARK MANAGEMENT SECTION  ---
+    st.markdown("### 🎯 Benchmark Website Management")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Add/Remove Benchmark Websites**")
+        new_urls = st.text_area("Enter URLs to add (one per line):")
+        if st.button("Add Benchmark Websites"):
+            if new_urls:
+                new_websites = set(url.strip() for url in new_urls.split('\n') if url.strip())
+                updated_websites = benchmark_websites.union(new_websites)
+                save_benchmark_csv(updated_websites)
+                st.success(f"✅ Added {len(new_websites)} benchmark websites!")
+                st.rerun()
+
+    with col2:
+        remove_urls = st.text_area("Enter URLs to remove (one per line):")
+        if st.button("Remove Benchmark Websites"):
+            if remove_urls:
+                remove_websites = set(url.strip() for url in remove_urls.split('\n') if url.strip())
+                updated_websites = benchmark_websites - remove_websites
+                save_benchmark_csv(updated_websites)
+                st.success(f"✅ Removed {len(remove_websites)} benchmark websites!")
+                st.rerun()
+
+    st.markdown("---")
 
     # --- BOTTOM SECTION ---
     endcol1, end_col2 = st.columns(2)
