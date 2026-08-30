@@ -66,6 +66,7 @@ def github_api_request(method, endpoint, data=None):
         return response.json() if response.content else True
     except Exception:
         return None
+
 def commit_to_github(file_path, commit_message):
     """Commit a file to GitHub silently (only shows errors)."""
     token = get_github_token()
@@ -109,6 +110,7 @@ def commit_to_github(file_path, commit_message):
 
     return True  
 
+# --- CSV Helper Functions ---
 def save_to_csv(file_path, data):
     """Save dictionary data to CSV and auto-commit to GitHub silently."""
     file_path.parent.mkdir(exist_ok=True)
@@ -129,31 +131,6 @@ def save_to_csv(file_path, data):
     # Auto-commit to GitHub (silent)
     commit_message = f"Auto-update {file_path.name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     commit_to_github(file_path, commit_message)  
-
-# --- CSV Helper Functions ---
-def save_to_csv(file_path, data):
-    """Save dictionary data to CSV and auto-commit to GitHub."""
-    file_path.parent.mkdir(exist_ok=True)
-    existing_data = load_from_csv(file_path) if file_path.exists() else {}
-    existing_data.update(data)
-
-    # Save locally
-    with open(file_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=["domain", "data", "timestamp"])
-        writer.writeheader()
-        for domain, value in existing_data.items():
-            writer.writerow({
-                "domain": domain,
-                "data": json.dumps(value),
-                "timestamp": value.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            })
-
-    # Auto-commit to GitHub
-    commit_message = f"Auto-update {file_path.name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    if commit_to_github(file_path, commit_message):
-        st.success(f"✅ Data saved and **automatically committed to GitHub**: {file_path.name}")
-    else:
-        st.warning(f"⚠️ Data saved locally to {file_path}. Check GitHub token.")
 
 def load_from_csv(file_path):
     """Load CSV data into a dictionary with timestamp."""
