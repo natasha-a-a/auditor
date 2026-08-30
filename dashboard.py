@@ -44,9 +44,6 @@ def load_benchmark_websites():
     return set(df['url'].tolist())
 
 
-# Load recommendations at startup
-RECOMMENDATIONS_DF = load_recommendations()
-
 def load_recommendations():
     """Load recommendations from CSV (local or GitHub) with proper error handling."""
     expected_columns = ['industry', 'category', 'check_name', 'business_impact', 'recommendation', 'priority']
@@ -139,6 +136,9 @@ def extract_contact_info(html, url):
     address_match = re.search(address_pattern, text)
     physical_address = address_match.group(0) if address_match else None
     return contact_email, physical_address
+
+# Load recommendations at startup
+RECOMMENDATIONS_DF = load_recommendations()
 
 # --- Data Processing Functions ---
 def filter_user_audits(cache):
