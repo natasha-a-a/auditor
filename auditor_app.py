@@ -13,12 +13,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from firecrawl import FirecrawlApp
 import whois
 import csv
-csv.field_size_limit(100000000)  # Increase to 10MB (or higher if needed)
 import os
 
+# Increase CSV field size limit FIRST (before any CSV operations)
+csv.field_size_limit(100000000)  # 100MB
+
 # --- Constants ---
-CACHE_DIR = Path("audit_cache")
-WHOIS_CACHE_DIR = Path("whois_cache")
+BASE_DIR = Path("/mount/src") if os.path.exists("/mount/src") else Path.cwd()
+CACHE_DIR = BASE_DIR / "audit_cache"
+WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
 AUDIT_CSV = CACHE_DIR / "audits.csv"
 WHOIS_CSV = WHOIS_CACHE_DIR / "whois.csv"
 CACHE_CLEANUP_DAYS = 90
@@ -29,36 +32,54 @@ WHOIS_RETRIES = 2
 for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
 
-# --- CSV Helper Functions ---
+# --- Optimized CSV Helper Functions ---
 def save_to_csv(file_path, data):
-    """Save dictionary data to CSV."""
+    """Save dictionary data to CSV, replacing existing entries (no duplicates)."""
     file_path.parent.mkdir(exist_ok=True)
-    mode = 'w' if not file_path.exists() else 'a'
-    with open(file_path, mode, newline='', encoding='utf-8') as f:
+
+    # Load existing data
+    existing_data = {}
+    if file_path.exists():
+        existing_data = load_from_csv(file_path)
+
+    # Update with new data (replaces existing domains)
+    existing_data.update(data)
+
+    # Write complete dataset back to CSV
+    with open(file_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=["domain", "data", "timestamp"])
-        if mode == 'w':
-            writer.writeheader()
-        for key, value in data.items():
+        writer.writeheader()
+        for domain, value in existing_data.items():
             writer.writerow({
-                "domain": key,
+                "domain": domain,
                 "data": json.dumps(value),
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": value.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             })
 
 def load_from_csv(file_path):
-    """Load CSV data into a dictionary."""
+    """Load CSV data into a dictionary with timestamp."""
     if not file_path.exists():
         return {}
     with open(file_path, mode='r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
-        return {row["domain"]: json.loads(row["data"]) for row in reader}
+        return {
+            row["domain"]: {
+                **json.loads(row["data"]),
+                "timestamp": row["timestamp"]  # Include timestamp in loaded data
+            }
+            for row in reader
+        }
 
 def load_cache():
     """Load audit cache from CSV."""
     return load_from_csv(AUDIT_CSV)
 
 def save_cache(cache):
-    """Save audit cache to CSV."""
+    """Save audit cache to CSV (updates existing entries)."""
+    # Add timestamp to each entry if missing
+    for domain, data in cache.items():
+        if "timestamp" not in data:
+            data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     save_to_csv(AUDIT_CSV, cache)
 
 def load_whois_cache():
@@ -66,7 +87,7 @@ def load_whois_cache():
     return load_from_csv(WHOIS_CSV)
 
 def save_whois_cache(cache):
-    """Save WHOIS cache to CSV."""
+    """Save WHOIS cache to CSV (updates existing entries)."""
     save_to_csv(WHOIS_CSV, cache)
 
 def cleanup_old_cache_entries(days=90):
@@ -75,10 +96,10 @@ def cleanup_old_cache_entries(days=90):
     cache = load_cache()
     whois_cache = load_whois_cache()
 
-    # Filter recent entries
+    # Filter recent entries using the included timestamp
     recent_cache = {
         k: v for k, v in cache.items()
-        if v.get("audit_date", "") >= cutoff_date
+        if v.get("timestamp", "1970-01-01").split()[0] >= cutoff_date
     }
     recent_whois_cache = {
         k: v for k, v in whois_cache.items()
@@ -89,7 +110,10 @@ def cleanup_old_cache_entries(days=90):
     save_cache(recent_cache)
     save_whois_cache(recent_whois_cache)
 
-    return {"audits": len(cache) - len(recent_cache), "whois": len(whois_cache) - len(recent_whois_cache)}
+    return {
+        "audits": len(cache) - len(recent_cache),
+        "whois": len(whois_cache) - len(recent_whois_cache)
+    }
 
 # Score deductions
 SCORE_DEDUCTIONS = {

@@ -6,53 +6,63 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import plotly.express as px
 import os
-import csv
-csv.field_size_limit(100000000)  # Increase to 10MB (or higher if needed)
 
-# --- Constants ---
-BASE_DIR = Path.cwd()  # Use current directory (same as auditor app)
+# Increase CSV field size limit FIRST (before any CSV operations)
+csv.field_size_limit(100000000)  # 100MB
+
+# --- Constants (MUST MATCH auditor_app.py) ---
+BASE_DIR = Path("/mount/src") if os.path.exists("/mount/src") else Path.cwd()
 CACHE_DIR = BASE_DIR / "audit_cache"
 WHOIS_CACHE_DIR = BASE_DIR / "whois_cache"
 AUDIT_CSV = CACHE_DIR / "audits.csv"
 WHOIS_CSV = WHOIS_CACHE_DIR / "whois.csv"
 CACHE_CLEANUP_DAYS = 90
-BATCH_SIZE = 10
-WHOIS_RETRIES = 2
 
 # Ensure directories exist
 for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
     directory.mkdir(exist_ok=True)
 
-# --- CSV Helper Functions (Same as auditor app) ---
+# --- CSV Helper Functions (MUST MATCH auditor_app.py) ---
 def save_to_csv(file_path, data):
-    """Save dictionary data to CSV."""
+    """Save dictionary data to CSV, replacing existing entries (no duplicates)."""
     file_path.parent.mkdir(exist_ok=True)
-    mode = 'w' if not file_path.exists() else 'a'
-    with open(file_path, mode, newline='', encoding='utf-8') as f:
+    existing_data = {}
+    if file_path.exists():
+        existing_data = load_from_csv(file_path)
+    existing_data.update(data)
+    with open(file_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=["domain", "data", "timestamp"])
-        if mode == 'w':
-            writer.writeheader()
-        for key, value in data.items():
+        writer.writeheader()
+        for domain, value in existing_data.items():
             writer.writerow({
-                "domain": key,
+                "domain": domain,
                 "data": json.dumps(value),
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": value.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             })
 
 def load_from_csv(file_path):
-    """Load CSV data into a dictionary."""
+    """Load CSV data into a dictionary with timestamp."""
     if not file_path.exists():
         return {}
     with open(file_path, mode='r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
-        return {row["domain"]: json.loads(row["data"]) for row in reader}
+        return {
+            row["domain"]: {
+                **json.loads(row["data"]),
+                "timestamp": row["timestamp"]
+            }
+            for row in reader
+        }
 
 def load_cache():
     """Load audit cache from CSV."""
     return load_from_csv(AUDIT_CSV)
 
 def save_cache(cache):
-    """Save audit cache to CSV."""
+    """Save audit cache to CSV (updates existing entries)."""
+    for domain, data in cache.items():
+        if "timestamp" not in data:
+            data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     save_to_csv(AUDIT_CSV, cache)
 
 def load_whois_cache():
@@ -60,9 +70,10 @@ def load_whois_cache():
     return load_from_csv(WHOIS_CSV)
 
 def save_whois_cache(cache):
-    """Save WHOIS cache to CSV."""
+    """Save WHOIS cache to CSV (updates existing entries)."""
     save_to_csv(WHOIS_CSV, cache)
 
+# --- Data Processing Functions ---
 def filter_recent_entries(cache, days=7):
     """Filter cache entries from the last N days."""
     cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -73,7 +84,6 @@ def get_last_n_entries(cache, n=10):
     sorted_entries = sorted(cache.items(), key=lambda x: x[1].get("audit_date", ""), reverse=True)
     return dict(sorted_entries[:n])
 
-# --- CSV Generation Functions ---
 def generate_full_csv(cache):
     """Generate a CSV of all audit data in the cache."""
     csv_data = []
@@ -203,6 +213,21 @@ def generate_painpoint_csv(cache):
 def main():
     st.set_page_config(page_title="Paw à Peau Audit Dashboard", layout="wide", page_icon="📊")
     st.title("📊 Paw à Peau Website Audit Dashboard")
+
+    # Debug: Show CSV paths
+    st.write(f"📁 Looking for audits at: {AUDIT_CSV.absolute()}")
+    st.write(f"📁 CSV exists: {AUDIT_CSV.exists()}")
+
+    # Auto-refresh cache
+    cache = load_cache()
+    if not cache:
+        st.warning("⚠️ No audit data found. Run the auditor app first to generate data.")
+        st.stop()
+
+    # Manual refresh button
+    if st.button("🔄 Refresh Data"):
+        st.rerun()
+
     st.markdown("""
     **Overview:**
     - **Benchmarks**: Compare scores across industries.
@@ -210,12 +235,6 @@ def main():
     - **Recent Entries**: View the last 10 audited websites.
     - **Download Reports**: Get detailed CSV files for analysis.
     """)
-
-    # Load cache from CSV
-    cache = load_cache()
-    if not cache:
-        st.warning("⚠️ No audit data found. Run the auditor app first to generate data.")
-        st.stop()
 
     # --- Benchmarks by Industry ---
     st.subheader("📈 Industry Benchmarks")
@@ -286,6 +305,7 @@ def main():
 
     # --- Downloadable Reports ---
     st.subheader("📥 Download Reports")
+
     full_csv_df = generate_full_csv(cache)
     if not full_csv_df.empty:
         csv_full = full_csv_df.to_csv(index=False)
@@ -295,6 +315,7 @@ def main():
             file_name=f"full_audit_report_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
             mime="text/csv"
         )
+
     painpoint_csv_df = generate_painpoint_csv(cache)
     if not painpoint_csv_df.empty:
         csv_painpoint = painpoint_csv_df.to_csv(index=False)
@@ -337,6 +358,7 @@ def main():
             pain_points["Budget Constraints"].append(data["url"])
         elif worst_category == "Dead End":
             pain_points["Dead End Risks"].append(data["url"])
+
     for category, urls in pain_points.items():
         if urls:
             with st.expander(f"{category} ({len(urls)} websites)"):
