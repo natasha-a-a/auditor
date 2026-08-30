@@ -66,9 +66,8 @@ def github_api_request(method, endpoint, data=None):
         return response.json() if response.content else True
     except Exception:
         return None
-
 def commit_to_github(file_path, commit_message):
-    """Commit a file to GitHub with accurate status reporting."""
+    """Commit a file to GitHub silently (only shows errors)."""
     token = get_github_token()
     if not token:
         st.warning("⚠️ GitHub token not configured. Add GITHUB_TOKEN to secrets.")
@@ -104,13 +103,32 @@ def commit_to_github(file_path, commit_message):
     if response is None:
         st.error(f"❌ Failed to commit {relative_path}. Check GitHub token.")
         return False
-    elif isinstance(response, dict) and "commit" in response:
-        commit_sha = response["commit"]["sha"]
-        st.success(f"✅ **Successfully committed** {relative_path} to GitHub (SHA: {commit_sha[:7]})")
-        return True
-    else:
+    elif not isinstance(response, dict) or "commit" not in response:
         st.error(f"❌ Unexpected GitHub response: {response}")
         return False
+
+    return True  
+
+def save_to_csv(file_path, data):
+    """Save dictionary data to CSV and auto-commit to GitHub silently."""
+    file_path.parent.mkdir(exist_ok=True)
+    existing_data = load_from_csv(file_path) if file_path.exists() else {}
+    existing_data.update(data)
+
+    # Save locally
+    with open(file_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=["domain", "data", "timestamp"])
+        writer.writeheader()
+        for domain, value in existing_data.items():
+            writer.writerow({
+                "domain": domain,
+                "data": json.dumps(value),
+                "timestamp": value.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            })
+
+    # Auto-commit to GitHub (silent)
+    commit_message = f"Auto-update {file_path.name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    commit_to_github(file_path, commit_message)  
 
 # --- CSV Helper Functions ---
 def save_to_csv(file_path, data):
