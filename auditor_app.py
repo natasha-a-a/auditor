@@ -1,45 +1,47 @@
-import streamlit as st
-import requests
-from bs4 import BeautifulSoup
-import pandas as pd
+# --- Standard Library Imports ---
+import os
+import csv
 import json
 import time
+import base64
 import logging
+import requests
 from pathlib import Path
 from datetime import datetime, timedelta
 import re
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# --- Third-Party Imports ---
+import streamlit as st
+import pandas as pd
+from bs4 import BeautifulSoup
 from firecrawl import FirecrawlApp
 import whois
-import csv
-import os
-import base64
-import requests
+
+# --- Constants ---
+# GitHub Configuration
+GITHUB_REPO = "natasha-a-a/auditor"
+GITHUB_BRANCH = "main"
+GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
+
+# Local Paths
+CACHE_DIR = Path("audit_cache")
+WHOIS_CACHE_DIR = Path("whois_cache")
+AUDIT_CSV = CACHE_DIR / "audits.csv"
+WHOIS_CSV = WHOIS_CACHE_DIR / "whois.csv"
+
+# Settings
+CACHE_CLEANUP_DAYS = 90
+BATCH_SIZE = 10
+WHOIS_RETRIES = 2
+
+# Initialize directories
+for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
+    directory.mkdir(exist_ok=True)
 
 # Increase CSV field size limit
 csv.field_size_limit(100000000)  # 100MB
-
-# --- GitHub Repository Configuration ---
-GITHUB_REPO = "natasha-a-a/auditor"  
-GITHUB_BRANCH = "main" 
-GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
-
-# --- Constants (Local + GitHub Paths) ---
-LOCAL_CACHE_DIR = Path("audit_cache")
-LOCAL_WHOIS_CACHE_DIR = Path("whois_cache")
-LOCAL_AUDIT_CSV = LOCAL_CACHE_DIR / "audits.csv"
-LOCAL_WHOIS_CSV = LOCAL_WHOIS_CACHE_DIR / "whois.csv"
-GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
-GITHUB_WHOIS_CSV_URL = f"{GITHUB_RAW_BASE}/whois_cache/whois.csv"
-CACHE_CLEANUP_DAYS = 90
-BATCH_SIZE = 10 
-WHOIS_RETRIES = 2  
-
-# Ensure directories exist
-for directory in [LOCAL_CACHE_DIR, LOCAL_WHOIS_CACHE_DIR]:
-    directory.mkdir(exist_ok=True)
-
 
 # --- GitHub Auto-Commit Functions ---
 def get_github_token():
@@ -59,15 +61,10 @@ def github_api_request(method, endpoint, data=None):
     }
 
     try:
-        if method == "GET":
-            response = requests.get(url, headers=headers)
-        else:
-            response = requests.request(method, url, json=data, headers=headers)
-
+        response = requests.request(method, url, json=data, headers=headers)
         if response.status_code >= 400:
             st.error(f"GitHub API Error: {response.status_code} - {response.text}")
             return None
-
         return response.json() if response.content else True
     except Exception as e:
         st.error(f"GitHub API request failed: {str(e)}")
@@ -80,12 +77,12 @@ def commit_to_github(file_path, commit_message):
         st.warning("⚠️ GitHub token not configured. Add GITHUB_TOKEN to secrets.")
         return False
 
-    # Read file content
+    # Read and encode file content
     with open(file_path, "rb") as f:
         content = f.read()
     encoded_content = base64.b64encode(content).decode("utf-8")
 
-    # Get current file SHA (for updates)
+    # Get current file SHA for updates
     relative_path = str(file_path.relative_to(Path.cwd()))
     current_file = github_api_request("GET", f"/contents/{relative_path}")
     file_sha = current_file.get("sha") if current_file else None
@@ -97,19 +94,16 @@ def commit_to_github(file_path, commit_message):
         "branch": GITHUB_BRANCH
     }
     if file_sha:
-        data["sha"] = file_sha  # Required for updating existing files
+        data["sha"] = file_sha
 
     # Commit to GitHub
-    response = github_api_request("PUT", f"/contents/{relative_path}", data)
-    return response is not None
+    return github_api_request("PUT", f"/contents/{relative_path}", data) is not None
 
 # --- CSV Helper Functions ---
 def save_to_csv(file_path, data):
     """Save dictionary data to CSV and auto-commit to GitHub."""
     file_path.parent.mkdir(exist_ok=True)
-    existing_data = {}
-    if file_path.exists():
-        existing_data = load_from_csv(file_path)
+    existing_data = load_from_csv(file_path) if file_path.exists() else {}
     existing_data.update(data)
 
     # Save locally
@@ -130,19 +124,8 @@ def save_to_csv(file_path, data):
     else:
         st.warning(f"⚠️ Data saved locally to {file_path}. Check GitHub token.")
 
-def save_cache(cache):
-    """Save audit cache to CSV and auto-commit to GitHub."""
-    for domain, data in cache.items():
-        if "timestamp" not in data:
-            data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    save_to_csv(AUDIT_CSV, cache)
-
-def save_whois_cache(cache):
-    """Save WHOIS cache to CSV and auto-commit to GitHub."""
-    save_to_csv(WHOIS_CSV, cache)
-
 def load_from_csv(file_path):
-    """Load local CSV data into a dictionary."""
+    """Load CSV data into a dictionary with timestamp."""
     if not file_path.exists():
         return {}
     with open(file_path, mode='r', encoding='utf-8') as f:
@@ -156,8 +139,23 @@ def load_from_csv(file_path):
         }
 
 def load_cache():
-    """Load audit cache from LOCAL CSV."""
-    return load_from_csv(LOCAL_AUDIT_CSV)
+    """Load audit cache from CSV."""
+    return load_from_csv(AUDIT_CSV)
+
+def load_whois_cache():
+    """Load WHOIS cache from CSV."""
+    return load_from_csv(WHOIS_CSV)
+
+def save_cache(cache):
+    """Save audit cache to CSV and auto-commit to GitHub."""
+    for domain, data in cache.items():
+        if "timestamp" not in data:
+            data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    save_to_csv(AUDIT_CSV, cache)
+
+def save_whois_cache(cache):
+    """Save WHOIS cache to CSV and auto-commit to GitHub."""
+    save_to_csv(WHOIS_CSV, cache)
 
 def cleanup_old_cache_entries(days=90):
     """Remove cache entries older than `days` days from CSV."""
@@ -165,7 +163,6 @@ def cleanup_old_cache_entries(days=90):
     cache = load_cache()
     whois_cache = load_whois_cache()
 
-    # Filter recent entries using the included timestamp
     recent_cache = {
         k: v for k, v in cache.items()
         if v.get("timestamp", "1970-01-01").split()[0] >= cutoff_date
@@ -175,7 +172,6 @@ def cleanup_old_cache_entries(days=90):
         if v.get("timestamp", "1970-01-01").split()[0] >= cutoff_date
     }
 
-    # Save filtered data
     save_cache(recent_cache)
     save_whois_cache(recent_whois_cache)
 
