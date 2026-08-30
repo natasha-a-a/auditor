@@ -75,7 +75,7 @@ def extract_contact_info(html, url):
             contact_email = email
             break
     if not contact_email and emails:
-        contact_email = emails[0]  # Fallback to first email if no non-generic found
+        contact_email = emails[0]  # Fallback to first email
 
     # Extract physical address (US format)
     address_pattern = r'\d+\s[\w\s]+,\s[\w\s]+,\s[A-Z]{2}\s\d{5}(?:-\d{4})?'
@@ -406,27 +406,18 @@ def main():
                     mime="text/csv"
                 )
 
-        # Cleaned up individual reports table
+        # Inline individual reports with download buttons
         st.markdown("### 📥 Individual In-Depth Reports")
-        report_data = []
         for domain, data in last_10_entries.items():
-            report_data.append({
-                "Website": data.get('url', 'N/A'),
-                "Date": data.get('audit_date', 'N/A')
-            })
-        report_df = pd.DataFrame(report_data)
-        st.dataframe(report_df, hide_index=True, use_container_width=True)
-
-        # Download buttons
-        st.markdown("**Download Reports:**")
-        cols = st.columns(min(len(last_10_entries), 5))  # Max 5 columns
-        for idx, (domain, data) in enumerate(last_10_entries.items()):
-            with cols[idx % len(cols)]:
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.write(f"{data.get('url', 'N/A')} - {data.get('audit_date', 'N/A')}")
+            with col2:
                 individual_df = generate_full_csv({domain: data})
                 if not individual_df.empty:
                     csv_individual = individual_df.to_csv(index=False)
                     st.download_button(
-                        label="Download CSV",
+                        label="Download",
                         data=csv_individual,
                         file_name=f"audit_{data.get('url', 'website').replace('https://', '').replace('/', '_')}_{datetime.now().strftime('%Y%m%d')}.csv",
                         mime="text/csv",
@@ -511,17 +502,25 @@ def main():
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(trend_df, use_container_width=True)
 
-    # --- Pain Point Download (User Audits Only) ---
+    # --- Pain Point Downloads (One per category) ---
     st.subheader("🎯 Download Websites by Pain Point")
     painpoint_df = generate_painpoint_csv_with_contact(cache)
     if not painpoint_df.empty:
-        csv_painpoint = painpoint_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Pain Point List with Contact Info",
-            data=csv_painpoint,
-            file_name=f"painpoint_contacts_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv"
-        )
+        # Get unique pain points
+        pain_points = painpoint_df['Pain Point'].unique()
+        cols = st.columns(min(len(pain_points), 3))  # Max 3 columns
+
+        for idx, pain_point in enumerate(pain_points):
+            with cols[idx % len(cols)]:
+                pain_point_data = painpoint_df[painpoint_df['Pain Point'] == pain_point]
+                csv_data = pain_point_data.to_csv(index=False)
+                st.download_button(
+                    label=f"📥 {pain_point}",
+                    data=csv_data,
+                    file_name=f"{pain_point.replace(' ', '_').replace('/', '_')}_websites_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    key=f"painpoint_{pain_point.replace(' ', '_')}"
+                )
 
 if __name__ == "__main__":
     main()
