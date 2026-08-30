@@ -1,0 +1,79 @@
+industry,category,score
+Automotive,technical,80
+Automotive,seo,75
+Automotive,content,70
+Automotive,ux,75
+Automotive,business,80
+Automotive,functional,85
+E-commerce,technical,85
+E-commerce,seo,80
+E-commerce,content,75
+E-commerce,ux,90
+E-commerce,business,85
+E-commerce,functional,90
+Education,technical,70
+Education,seo,75
+Education,content,90
+Education,ux,75
+Education,business,80
+Education,functional,80
+Fashion,technical,80
+Fashion,seo,85
+Fashion,content,85
+Fashion,ux,90
+Fashion,business,75
+Fashion,functional,80
+Finance,technical,90
+Finance,seo,75
+Finance,content,80
+Finance,ux,85
+Finance,business,85
+Finance,functional,90
+Food & Beverage,technical,75
+Food & Beverage,seo,70
+Food & Beverage,content,80
+Food & Beverage,ux,80
+Food & Beverage,business,70
+Food & Beverage,functional,75
+Healthcare,technical,75
+Healthcare,seo,70
+Healthcare,content,85
+Healthcare,ux,80
+Healthcare,business,90
+Healthcare,functional,75
+Manufacturing,technical,70
+Manufacturing,seo,60
+Manufacturing,content,65
+Manufacturing,ux,60
+Manufacturing,business,70
+Manufacturing,functional,65
+Retail,technical,80
+Retail,seo,85
+Retail,content,80
+Retail,ux,85
+Retail,business,80
+Retail,functional,85
+Real Estate,technical,75
+Real Estate,seo,80
+Real Estate,content,75
+Real Estate,ux,85
+Real Estate,business,85
+Real Estate,functional,70
+Technology,technical,95
+Technology,seo,90
+Technology,content,90
+Technology,ux,90
+Technology,business,85
+Technology,functional,90
+Travel,technical,85
+Travel,seo,85
+Travel,content,80
+Travel,ux,90
+Travel,business,75
+Travel,functional,80
+Other,technical,70
+Other,seo,65
+Other,content,70
+Other,ux,65
+Other,business,60
+Other,functional,60

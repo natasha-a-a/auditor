@@ -1,4 +1,3 @@
-# --- Standard Library Imports ---
 import os
 import csv
 import json
@@ -9,31 +8,38 @@ import requests
 from pathlib import Path
 from datetime import datetime, timedelta
 import re
+import io
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-# --- Third-Party Imports ---
 import streamlit as st
 import pandas as pd
 from bs4 import BeautifulSoup
 from firecrawl import FirecrawlApp
 import whois
+import numpy as np
 
 # --- Constants ---
 GITHUB_REPO = "natasha-a-a/auditor"
 GITHUB_BRANCH = "main"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
+GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
+GITHUB_WHOIS_CSV_URL = f"{GITHUB_RAW_BASE}/whois_cache/whois.csv"
+GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
+GITHUB_INDUSTRY_BENCHMARKS_CSV_URL = f"{GITHUB_RAW_BASE}/industry_benchmarks.csv"
+GITHUB_COMPETITORS_CSV_URL = f"{GITHUB_RAW_BASE}/competitors.csv"
+GITHUB_SCORE_DEDUCTIONS_CSV_URL = f"{GITHUB_RAW_BASE}/score_deductions.csv"
+GITHUB_THRESHOLDS_CSV_URL = f"{GITHUB_RAW_BASE}/thresholds.csv"
 
 # Local Paths
 CACHE_DIR = Path("audit_cache")
 WHOIS_CACHE_DIR = Path("whois_cache")
 AUDIT_CSV = CACHE_DIR / "audits.csv"
 WHOIS_CSV = WHOIS_CACHE_DIR / "whois.csv"
-
-# Settings
-CACHE_CLEANUP_DAYS = 90
-BATCH_SIZE = 10
-WHOIS_RETRIES = 2
+LOCAL_BENCHMARK_CSV = Path("benchmark_websites.csv")
+LOCAL_INDUSTRY_BENCHMARKS_CSV = Path("industry_benchmarks.csv")
+LOCAL_COMPETITORS_CSV = Path("competitors.csv")
+LOCAL_SCORE_DEDUCTIONS_CSV = Path("score_deductions.csv")
+LOCAL_THRESHOLDS_CSV = Path("thresholds.csv")
 
 # Initialize directories
 for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
@@ -41,6 +47,191 @@ for directory in [CACHE_DIR, WHOIS_CACHE_DIR]:
 
 # Increase CSV field size limit
 csv.field_size_limit(100000000)  # 100MB
+
+# --- Configuration Loading Functions ---
+def load_config_from_csv(csv_url, local_path, default={}):
+    """Load simple key-value configuration from CSV (local or GitHub)."""
+    # Try local first
+    if local_path.exists():
+        try:
+            df = pd.read_csv(local_path)
+            if not df.empty and len(df.columns) >= 2:
+                return {row.iloc[0]: row.iloc[1] for _, row in df.iterrows()}
+        except Exception:
+            pass
+
+    # Fallback to GitHub
+    try:
+        response = requests.get(csv_url)
+        if response.status_code == 200:
+            df = pd.read_csv(io.StringIO(response.text))
+            if not df.empty and len(df.columns) >= 2:
+                return {row.iloc[0]: row.iloc[1] for _, row in df.iterrows()}
+    except Exception:
+        pass
+
+    return default
+
+def load_benchmarks_from_csv(csv_url, local_path):
+    """Load industry benchmarks from CSV."""
+    # Default fallback
+    default_benchmarks = {
+        "Other": {"technical": 70, "seo": 65, "content": 70, "ux": 65, "business": 60, "functional": 60}
+    }
+
+    # Try local first
+    if local_path.exists():
+        try:
+            df = pd.read_csv(local_path)
+            if not df.empty:
+                benchmarks = {}
+                for _, row in df.iterrows():
+                    industry = row['industry']
+                    if industry not in benchmarks:
+                        benchmarks[industry] = {}
+                    benchmarks[industry][row['category']] = row['score']
+                if benchmarks:
+                    return benchmarks
+        except Exception:
+            pass
+
+    # Fallback to GitHub
+    try:
+        response = requests.get(csv_url)
+        if response.status_code == 200:
+            df = pd.read_csv(io.StringIO(response.text))
+            if not df.empty:
+                benchmarks = {}
+                for _, row in df.iterrows():
+                    industry = row['industry']
+                    if industry not in benchmarks:
+                        benchmarks[industry] = {}
+                    benchmarks[industry][row['category']] = row['score']
+                if benchmarks:
+                    return benchmarks
+    except Exception:
+        pass
+
+    return default_benchmarks
+
+def load_competitors_from_csv(csv_url, local_path):
+    """Load competitors from CSV."""
+    # Default fallback
+    default_competitors = {}
+
+    # Try local first
+    if local_path.exists():
+        try:
+            df = pd.read_csv(local_path)
+            if not df.empty:
+                competitors = {}
+                for _, row in df.iterrows():
+                    if row['industry'] not in competitors:
+                        competitors[row['industry']] = []
+                    competitors[row['industry']].append(row['url'])
+                if competitors:
+                    return competitors
+        except Exception:
+            pass
+
+    # Fallback to GitHub
+    try:
+        response = requests.get(csv_url)
+        if response.status_code == 200:
+            df = pd.read_csv(io.StringIO(response.text))
+            if not df.empty:
+                competitors = {}
+                for _, row in df.iterrows():
+                    if row['industry'] not in competitors:
+                        competitors[row['industry']] = []
+                    competitors[row['industry']].append(row['url'])
+                if competitors:
+                    return competitors
+    except Exception:
+        pass
+
+    return default_competitors
+
+def load_benchmark_websites():
+    """Load benchmark websites from local CSV or GitHub."""
+    # Try local first
+    if LOCAL_BENCHMARK_CSV.exists():
+        try:
+            df = pd.read_csv(LOCAL_BENCHMARK_CSV)
+            if not df.empty:
+                return set(df['url'].tolist())
+        except Exception:
+            pass
+
+    # Fallback to GitHub
+    try:
+        response = requests.get(GITHUB_BENCHMARK_CSV_URL)
+        if response.status_code == 200:
+            df = pd.read_csv(io.StringIO(response.text))
+            if not df.empty:
+                return set(df['url'].tolist())
+    except Exception:
+        pass
+
+    return set()
+
+# Load all configurations
+SCORE_DEDUCTIONS = load_config_from_csv(
+    GITHUB_SCORE_DEDUCTIONS_CSV_URL,
+    LOCAL_SCORE_DEDUCTIONS_CSV,
+    {
+        "ssl_invalid": 30, "slow_load_time": 10, "mobile_unfriendly": 10,
+        "flash_elements": 15, "broken_links": 5, "outdated_plugins": 10,
+        "missing_structured_data": 5, "missing_security_headers": 10,
+        "no_products": 20, "no_company_info": 15, "no_certifications": 15,
+        "no_testimonials": 10, "outdated_copyright": 5,
+        "no_contact_form": 10, "no_rfq": 15, "no_ecommerce": 10, "no_blog": 5,
+        "no_analytics": 10, "no_local_seo": 10,
+        "missing_meta_title": 10, "missing_meta_description": 10, "missing_alt_text": 5,
+        "deep_url_structure": 5, "few_internal_links": 5,
+        "no_physical_address": 10, "no_employee_photos": 5, "no_online_payments": 10,
+        "generic_email": 5, "diy_website": 10, "no_updates": 10,
+        "domain_expiring": 25, "parked_domain": 30
+    }
+)
+
+INDUSTRY_BENCHMARKS = load_benchmarks_from_csv(
+    GITHUB_INDUSTRY_BENCHMARKS_CSV_URL,
+    LOCAL_INDUSTRY_BENCHMARKS_CSV
+)
+
+COMPETITOR_LISTS = load_competitors_from_csv(
+    GITHUB_COMPETITORS_CSV_URL,
+    LOCAL_COMPETITORS_CSV
+)
+
+# Load thresholds
+thresholds = load_config_from_csv(
+    GITHUB_THRESHOLDS_CSV_URL,
+    LOCAL_THRESHOLDS_CSV,
+    {
+        "LOAD_TIME_THRESHOLD": 3.0,
+        "MIN_CONTENT_WORDS": 300,
+        "MAX_URL_DEPTH": 3,
+        "MIN_INTERNAL_LINKS": 5,
+        "MAX_PARAGRAPH_LENGTH": 150,
+        "COPYRIGHT_YEAR_THRESHOLD": 2,
+        "CACHE_CLEANUP_DAYS": 180,
+        "BATCH_SIZE": 10,
+        "WHOIS_RETRIES": 2
+    }
+)
+
+# Assign thresholds to variables
+LOAD_TIME_THRESHOLD = float(thresholds.get("LOAD_TIME_THRESHOLD", 3.0))
+MIN_CONTENT_WORDS = int(thresholds.get("MIN_CONTENT_WORDS", 300))
+MAX_URL_DEPTH = int(thresholds.get("MAX_URL_DEPTH", 3))
+MIN_INTERNAL_LINKS = int(thresholds.get("MIN_INTERNAL_LINKS", 5))
+MAX_PARAGRAPH_LENGTH = int(thresholds.get("MAX_PARAGRAPH_LENGTH", 150))
+COPYRIGHT_YEAR_THRESHOLD = int(thresholds.get("COPYRIGHT_YEAR_THRESHOLD", 2))
+CACHE_CLEANUP_DAYS = int(thresholds.get("CACHE_CLEANUP_DAYS", 180))
+BATCH_SIZE = int(thresholds.get("BATCH_SIZE", 10))
+WHOIS_RETRIES = int(thresholds.get("WHOIS_RETRIES", 2))
 
 # --- GitHub Auto-Commit Functions ---
 def get_github_token():
@@ -108,13 +299,24 @@ def commit_to_github(file_path, commit_message):
         st.error(f"❌ Unexpected GitHub response: {response}")
         return False
 
-    return True  
+    return True
+
+def save_benchmark_csv(benchmark_websites):
+    """Save benchmark websites to local CSV and GitHub."""
+    df = pd.DataFrame({"url": list(benchmark_websites)})
+    df.to_csv(LOCAL_BENCHMARK_CSV, index=False)
+
+    # Auto-commit to GitHub
+    commit_message = f"Update benchmark websites at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    commit_to_github(LOCAL_BENCHMARK_CSV, commit_message)
 
 # --- CSV Helper Functions ---
 def save_to_csv(file_path, data):
     """Save dictionary data to CSV and auto-commit to GitHub silently."""
     file_path.parent.mkdir(exist_ok=True)
-    existing_data = load_from_csv(file_path) if file_path.exists() else {}
+    existing_data = {}
+    if file_path.exists():
+        existing_data = load_from_csv(file_path)
     existing_data.update(data)
 
     # Save locally
@@ -130,7 +332,7 @@ def save_to_csv(file_path, data):
 
     # Auto-commit to GitHub (silent)
     commit_message = f"Auto-update {file_path.name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    commit_to_github(file_path, commit_message)  
+    commit_to_github(file_path, commit_message)
 
 def load_from_csv(file_path):
     """Load CSV data into a dictionary with timestamp."""
@@ -150,10 +352,6 @@ def load_cache():
     """Load audit cache from CSV."""
     return load_from_csv(AUDIT_CSV)
 
-def load_whois_cache():
-    """Load WHOIS cache from CSV."""
-    return load_from_csv(WHOIS_CSV)
-
 def save_cache(cache):
     """Save audit cache to CSV and auto-commit to GitHub."""
     for domain, data in cache.items():
@@ -161,11 +359,15 @@ def save_cache(cache):
             data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     save_to_csv(AUDIT_CSV, cache)
 
+def load_whois_cache():
+    """Load WHOIS cache from CSV."""
+    return load_from_csv(WHOIS_CSV)
+
 def save_whois_cache(cache):
     """Save WHOIS cache to CSV and auto-commit to GitHub."""
     save_to_csv(WHOIS_CSV, cache)
 
-def cleanup_old_cache_entries(days=90):
+def cleanup_old_cache_entries(days=CACHE_CLEANUP_DAYS):
     """Remove cache entries older than `days` days from CSV."""
     cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     cache = load_cache()
@@ -187,74 +389,6 @@ def cleanup_old_cache_entries(days=90):
         "audits": len(cache) - len(recent_cache),
         "whois": len(whois_cache) - len(recent_whois_cache)
     }
-
-# Score deductions
-SCORE_DEDUCTIONS = {
-    "ssl_invalid": 30, "slow_load_time": 10, "mobile_unfriendly": 10,
-    "flash_elements": 15, "broken_links": 5, "outdated_plugins": 10,
-    "missing_structured_data": 5, "missing_security_headers": 10,
-    "no_products": 20, "no_company_info": 15, "no_certifications": 15,
-    "no_testimonials": 10, "outdated_copyright": 5,
-    "no_contact_form": 10, "no_rfq": 15, "no_ecommerce": 10, "no_blog": 5,
-    "no_analytics": 10, "no_local_seo": 10,
-    "missing_meta_title": 10, "missing_meta_description": 10, "missing_alt_text": 5,
-    "deep_url_structure": 5, "few_internal_links": 5,
-    "no_physical_address": 10, "no_employee_photos": 5, "no_online_payments": 10,
-    "generic_email": 5, "diy_website": 10, "no_updates": 10,
-    "domain_expiring": 25, "parked_domain": 30,
-}
-
-# Thresholds
-LOAD_TIME_THRESHOLD = 3.0
-MIN_CONTENT_WORDS = 300
-MAX_URL_DEPTH = 3
-MIN_INTERNAL_LINKS = 5
-MAX_PARAGRAPH_LENGTH = 150
-COPYRIGHT_YEAR_THRESHOLD = 2
-
-# Industry benchmarks
-INDUSTRY_BENCHMARKS = {
-    "Automotive": {"technical": 80, "seo": 75, "content": 70, "ux": 75, "business": 80, "functional": 85},
-    "E-commerce": {"technical": 85, "seo": 80, "content": 75, "ux": 90, "business": 85, "functional": 90},
-    "Education": {"technical": 70, "seo": 75, "content": 90, "ux": 75, "business": 80, "functional": 80},
-    "Fashion": {"technical": 80, "seo": 85, "content": 85, "ux": 90, "business": 75, "functional": 80},
-    "Finance": {"technical": 90, "seo": 75, "content": 80, "ux": 85, "business": 85, "functional": 90},
-    "Food & Beverage": {"technical": 75, "seo": 70, "content": 80, "ux": 80, "business": 70, "functional": 75},
-    "Healthcare": {"technical": 75, "seo": 70, "content": 85, "ux": 80, "business": 90, "functional": 75},
-    "Manufacturing": {"technical": 70, "seo": 60, "content": 65, "ux": 60, "business": 70, "functional": 65},
-    "Retail": {"technical": 80, "seo": 85, "content": 80, "ux": 85, "business": 80, "functional": 85},
-    "Real Estate": {"technical": 75, "seo": 80, "content": 75, "ux": 85, "business": 85, "functional": 70},
-    "Technology": {"technical": 95, "seo": 90, "content": 90, "ux": 90, "business": 85, "functional": 90},
-    "Travel": {"technical": 85, "seo": 85, "content": 80, "ux": 90, "business": 75, "functional": 80},
-    "Other": {"technical": 70, "seo": 65, "content": 70, "ux": 65, "business": 60, "functional": 60}
-}
-
-# Competitor lists
-COMPETITOR_LISTS = {
-    "E-commerce": ["https://www.amazon.com", "https://www.ebay.com", "https://www.etsy.com", "https://www.shopify.com", "https://www.walmart.com"],
-    "Manufacturing": ["https://www.3m.com", "https://www.ge.com", "https://www.siemens.com", "https://www.honeywell.com", "https://www.bosch.com"],
-    "Retail": ["https://www.target.com", "https://www.bestbuy.com", "https://www.ikea.com", "https://www.homedepot.com", "https://www.lowes.com"],
-    "Technology": ["https://www.microsoft.com", "https://www.apple.com", "https://www.google.com", "https://www.ibm.com", "https://www.oracle.com"],
-    "Healthcare": ["https://www.unitedhealthgroup.com", "https://www.kaiserpermanente.org", "https://www.cvshealth.com", "https://www.tenethealth.com", "https://www.hcahealthcare.com"],
-    "Education": ["https://www.coursera.org", "https://www.udemy.com", "https://www.khanacademy.org", "https://www.edx.org", "https://www.linkedin.com/learning"],
-    "Finance": ["https://www.chase.com", "https://www.bankofamerica.com", "https://www.wellsfargo.com", "https://www.citigroup.com", "https://www.goldmansachs.com"],
-    "Travel": ["https://www.booking.com", "https://www.expedia.com", "https://www.airbnb.com", "https://www.tripadvisor.com", "https://www.kayak.com"],
-    "Food & Beverage": ["https://www.mcdonalds.com", "https://www.starbucks.com", "https://www.chipotle.com", "https://www.papajohns.com", "https://www.dominos.com"],
-    "Automotive": ["https://www.toyota.com", "https://www.ford.com", "https://www.honda.com", "https://www.gm.com", "https://www.tesla.com"],
-    "Real Estate": ["https://www.zillow.com", "https://www.realtor.com", "https://www.redfin.com", "https://www.trulia.com", "https://www.remax.com"],
-    "Fashion": ["https://www.zara.com", "https://www.hm.com", "https://www.gucci.com", "https://www.louisvuitton.com", "https://www.chanel.com"]
-}
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("auditor_app.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---
 def normalize_url(url):
@@ -283,14 +417,12 @@ def get_firecrawl_app():
             raise ValueError("Firecrawl API key not configured.")
         return FirecrawlApp(api_key=api_key)
     except Exception as e:
-        logger.warning(f"Firecrawl initialization failed: {str(e)}. Falling back to requests.")
         st.warning(f"Firecrawl initialization failed: {str(e)}. Falling back to requests.")
         return None
 
 def crawl_page(url, max_retries=2):
     """Crawl a page using requests first, Firecrawl as fallback."""
     if not validate_url(url):
-        logger.error(f"Invalid or unsafe URL: {url}")
         st.error(f"Invalid or unsafe URL: {url}")
         return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
 
@@ -310,10 +442,8 @@ def crawl_page(url, max_retries=2):
                 "headers": headers
             }
         except requests.exceptions.SSLError:
-            logger.warning(f"SSL error for {url}")
             return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
         except Exception as e:
-            logger.warning(f"Request attempt {attempt + 1} failed for {url}: {str(e)}")
             if attempt == max_retries - 1:
                 fc = get_firecrawl_app()
                 if fc:
@@ -329,10 +459,8 @@ def crawl_page(url, max_retries=2):
                                 "load_time": None,
                                 "headers": {}
                             }
-                    except Exception as e:
-                        logger.error(f"Firecrawl failed for {url}: {str(e)}")
-                logger.error(f"Crawl failed for {url} after {max_retries} attempts: {str(e)}")
-                st.error(f"Crawl failed for {url} after {max_retries} attempts: {str(e)}")
+                    except Exception:
+                        pass
                 return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
             continue
     return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
@@ -363,11 +491,9 @@ def check_domain_expiration(url, whois_cache):
                 save_whois_cache(whois_cache)
                 return expiring_soon
             return False
-        except Exception as e:
-            logger.warning(f"WHOIS attempt {attempt + 1} failed for {domain}: {str(e)}")
+        except Exception:
             if attempt == WHOIS_RETRIES - 1:
-                logger.error(f"WHOIS lookup failed for {domain} after {WHOIS_RETRIES} attempts")
-                whois_cache[domain] = {"expiring_soon": False, "error": str(e), "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                whois_cache[domain] = {"expiring_soon": False, "error": "WHOIS lookup failed", "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
                 save_whois_cache(whois_cache)
                 return False
             time.sleep(1)
@@ -385,8 +511,7 @@ def is_parked_domain(url):
         ]
         text = soup.get_text().lower()
         return any(indicator in text for indicator in parked_indicators)
-    except Exception as e:
-        logger.warning(f"Parked domain check failed for {url}: {str(e)}")
+    except Exception:
         return False
 
 def crawl_competitors_parallel(competitor_urls, max_workers=3, progress_bar=None):
@@ -398,9 +523,7 @@ def crawl_competitors_parallel(competitor_urls, max_workers=3, progress_bar=None
             url = future_to_url[future]
             try:
                 results[url] = future.result()
-            except Exception as e:
-                logger.error(f"Failed to crawl {url}: {str(e)}")
-                st.warning(f"Failed to crawl {url}: {str(e)}")
+            except Exception:
                 results[url] = {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
             if progress_bar:
                 progress_bar.progress((i + 1) / len(future_to_url))
@@ -410,7 +533,69 @@ def fetch_competitors(industry_keyword):
     """Return predefined competitors for the selected industry."""
     return COMPETITOR_LISTS.get(industry_keyword, [])
 
-def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, status_text, batch_num, total_batches):
+def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
+    """Fetch competitor benchmarks from predefined lists or fall back to industry benchmarks."""
+    domain = urlparse(url).netloc
+    competitors = []
+
+    if industry_keyword != "Other":
+        competitors = fetch_competitors(industry_keyword)
+
+    # Crawl any uncrawled competitors
+    uncrawled_competitors = [
+        url for url in competitors
+        if urlparse(url).netloc not in cache
+    ]
+    if uncrawled_competitors:
+        st.info(f"Crawling {len(uncrawled_competitors)} competitors for {industry_keyword}...")
+        progress_bar = st.progress(0)
+        competitor_results = crawl_competitors_parallel(uncrawled_competitors, progress_bar=progress_bar)
+        for url, crawl_result in competitor_results.items():
+            if crawl_result["html"]:
+                tech_audit = technical_audit(crawl_result)
+                business_audit = business_info_audit(crawl_result, url)
+                functional_audit = functional_gaps_audit(crawl_result, url)
+                seo_audit_result = seo_visibility_audit(crawl_result, url)
+                budget_audit = budget_red_flags_audit(crawl_result, url)
+                dead_end = dead_end_detection(url, crawl_result, whois_cache)
+                growth_audit = growth_signals_audit(crawl_result, url)
+
+                cache[urlparse(url).netloc] = {
+                    "url": url,
+                    "technical": tech_audit,
+                    "business": business_audit,
+                    "functional": functional_audit,
+                    "seo": seo_audit_result,
+                    "budget": budget_audit,
+                    "dead_end": dead_end,
+                    "growth": growth_audit,
+                    "industry_keyword": industry_keyword,
+                    "is_benchmark": True  # Mark as benchmark
+                }
+            else:
+                st.warning(f"Could not crawl competitor: {url}")
+
+    # Calculate benchmarks from competitors in the same industry
+    industry_competitors = [
+        data for domain, data in cache.items()
+        if data.get("industry_keyword") == industry_keyword and data.get("is_benchmark", False)
+    ]
+
+    if industry_competitors:
+        avg_scores = {
+            "technical": np.mean([c["technical"]["score"] for c in industry_competitors]),
+            "business": np.mean([c["business"]["score"] for c in industry_competitors]),
+            "functional": np.mean([c["functional"]["score"] for c in industry_competitors]),
+            "seo": np.mean([c["seo"]["score"] for c in industry_competitors]),
+            "budget": np.mean([c["budget"]["score"] for c in industry_competitors]),
+            "dead_end": np.mean([c["dead_end"]["score"] for c in industry_competitors])
+        }
+        return avg_scores
+    else:
+        # Fall back to industry benchmarks
+        return INDUSTRY_BENCHMARKS.get(industry_keyword, INDUSTRY_BENCHMARKS["Other"])
+
+def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, status_text, batch_num, total_batches, benchmark_websites):
     """Process a batch of URLs."""
     results = []
     for i, url in enumerate(urls):
@@ -443,6 +628,7 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
             "url": url,
             "audit_date": datetime.now().strftime("%Y-%m-%d"),
             "industry_keyword": industry_keyword,
+            "is_benchmark": url in benchmark_websites,  # Mark if it's a benchmark website
             "crawl": crawl_result,
             "technical": tech_audit,
             "business": business_audit,
@@ -455,6 +641,7 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
         }
         results.append(result)
         cache[domain_key] = result
+
     return results
 
 # --- Audit Functions ---
@@ -521,7 +708,7 @@ def technical_audit(crawl_result):
     broken_status = "Good" if not broken_links else "Needs improvement"
     checks["broken_links"] = {"status": broken_status, "issue": f"{len(broken_links)} broken links found"}
     if broken_links:
-        score -= SCORE_DEDUCTIONS["broken_links"] * len(broken_links)
+        score -= SCORE_DEDUCTIONS["broken_links"] * min(len(broken_links), 5)  # Cap at 5 broken links
         issues.append(f"{len(broken_links)} broken links detected")
 
     # Structured data
@@ -551,20 +738,20 @@ def business_info_audit(crawl_result, url):
     score = 100
     issues = []
     checks = {}
+    text = soup.get_text().lower()
 
     # Products/services listed
-    product_links = [a for a in soup.find_all("a") if "product" in a.get("href", "").lower() or "service" in a.get("href", "").lower()]
-    product_pages = [a for a in soup.find_all("a") if re.search(r"/(products?|services?)/", a.get("href", ""), re.I)]
-    has_products = bool(product_links or product_pages or soup.find(string=re.compile("our products?|our services?", re.I)))
+    product_keywords = ["our products", "our services", "products", "services"]
+    has_products = any(keyword in text for keyword in product_keywords)
     product_status = "Good" if has_products else "Critical"
-    checks["products_services"] = {"status": product_status, "issue": "No products/services pages detected"}
+    checks["products_services"] = {"status": product_status, "issue": "No products/services clearly listed"}
     if not has_products:
         score -= SCORE_DEDUCTIONS["no_products"]
         issues.append("No products or services clearly listed")
 
     # Company story/team/certifications
-    about_page = soup.find("a", href=lambda x: x and re.search(r"/(about|company|team|who-we-are)/", x, re.I))
-    has_about = bool(about_page or soup.find(string=re.compile("about us|our story|our team|company history", re.I)))
+    about_keywords = ["about us", "our story", "our team", "company history", "who we are"]
+    has_about = any(keyword in text for keyword in about_keywords)
     about_status = "Good" if has_about else "Needs improvement"
     checks["company_info"] = {"status": about_status, "issue": "No company story, team, or history detected"}
     if not has_about:
@@ -573,8 +760,7 @@ def business_info_audit(crawl_result, url):
 
     # Certifications
     cert_keywords = ["iso 9001", "iso 14001", "reach", "rohs", "safety data sheet", "sds", "ce marking", "fda", "ul listed"]
-    cert_content = soup.get_text().lower()
-    has_certifications = any(keyword in cert_content for keyword in cert_keywords)
+    has_certifications = any(keyword in text for keyword in cert_keywords)
     cert_status = "Good" if has_certifications else "Needs improvement"
     checks["certifications"] = {"status": cert_status, "issue": "No certifications detected"}
     if not has_certifications:
@@ -583,7 +769,7 @@ def business_info_audit(crawl_result, url):
 
     # Testimonials
     testimonial_keywords = ["testimonial", "case study", "client success", "customer story"]
-    has_testimonials = any(keyword in cert_content for keyword in testimonial_keywords)
+    has_testimonials = any(keyword in text for keyword in testimonial_keywords)
     testimonial_status = "Good" if has_testimonials else "Needs improvement"
     checks["testimonials"] = {"status": testimonial_status, "issue": "No case studies or testimonials detected"}
     if not has_testimonials:
@@ -591,7 +777,7 @@ def business_info_audit(crawl_result, url):
         issues.append("No case studies or testimonials detected")
 
     # Copyright year
-    copyright_match = re.search(r'©\s*(\d{4})', soup.get_text())
+    copyright_match = re.search(r'©\s*(\d{4})', text)
     current_year = datetime.now().year
     if copyright_match:
         copyright_year = int(copyright_match.group(1))
@@ -613,11 +799,12 @@ def functional_gaps_audit(crawl_result, url):
     score = 100
     issues = []
     checks = {}
+    text = soup.get_text().lower()
 
     # Contact form
     contact_forms = soup.find_all("form", action=lambda x: x and ("contact" in x.lower() or "email" in x.lower()))
     contact_form_keywords = ["contact us", "get in touch", "send a message", "request information"]
-    has_contact_form = bool(contact_forms or any(keyword in soup.get_text().lower() for keyword in contact_form_keywords))
+    has_contact_form = bool(contact_forms or any(keyword in text for keyword in contact_form_keywords))
     contact_status = "Good" if has_contact_form else "Needs improvement"
     checks["contact_form"] = {"status": contact_status, "issue": "No contact form detected"}
     if not has_contact_form:
@@ -626,7 +813,7 @@ def functional_gaps_audit(crawl_result, url):
 
     # RFQ system
     rfq_keywords = ["request for quote", "get a quote", "rfq", "quote request", "request pricing"]
-    has_rfq = any(keyword in soup.get_text().lower() for keyword in rfq_keywords)
+    has_rfq = any(keyword in text for keyword in rfq_keywords)
     rfq_status = "Good" if has_rfq else "Needs improvement"
     checks["rfq_system"] = {"status": rfq_status, "issue": "No RFQ (Request for Quote) system detected"}
     if not has_rfq:
@@ -635,7 +822,7 @@ def functional_gaps_audit(crawl_result, url):
 
     # E-commerce
     ecommerce_keywords = ["add to cart", "buy now", "shop now", "checkout", "add to basket", "purchase"]
-    has_ecommerce = any(keyword in soup.get_text().lower() for keyword in ecommerce_keywords)
+    has_ecommerce = any(keyword in text for keyword in ecommerce_keywords)
     ecommerce_status = "Good" if has_ecommerce else "Needs improvement"
     checks["ecommerce"] = {"status": ecommerce_status, "issue": "No e-commerce functionality detected"}
     if not has_ecommerce:
@@ -644,7 +831,7 @@ def functional_gaps_audit(crawl_result, url):
 
     # Blog/resource section
     blog_keywords = ["blog", "news", "resources", "articles", "insights"]
-    has_blog = any(keyword in soup.get_text().lower() for keyword in blog_keywords)
+    has_blog = any(keyword in text for keyword in blog_keywords)
     blog_status = "Good" if has_blog else "Needs improvement"
     checks["blog"] = {"status": blog_status, "issue": "No blog or resource section detected"}
     if not has_blog:
@@ -685,7 +872,7 @@ def seo_visibility_audit(crawl_result, url):
     alt_status = "Good" if not images_without_alt else "Needs improvement"
     checks["alt_text"] = {"status": alt_status, "issue": f"{len(images_without_alt)} images missing alt text"}
     if images_without_alt:
-        score -= SCORE_DEDUCTIONS["missing_alt_text"]
+        score -= SCORE_DEDUCTIONS["missing_alt_text"] * min(len(images_without_alt), 5)
         issues.append(f"{len(images_without_alt)} images are missing alt text")
 
     # URL structure
@@ -734,11 +921,11 @@ def budget_red_flags_audit(crawl_result, url):
     score = 100
     issues = []
     checks = {}
-    content = soup.get_text().lower()
+    text = soup.get_text().lower()
 
     # Physical address
     address_pattern = re.compile(r'\d+\s[\w\s]+,\s[\w\s]+,\s[A-Z]{2}\s\d{5}')
-    has_address = bool(address_pattern.search(content))
+    has_address = bool(address_pattern.search(text))
     address_status = "Good" if has_address else "Needs improvement"
     checks["physical_address"] = {"status": address_status, "issue": "No physical address detected"}
     if not has_address:
@@ -756,7 +943,7 @@ def budget_red_flags_audit(crawl_result, url):
 
     # Online payments
     payment_keywords = ["stripe", "paypal", "square", "checkout.com", "payment gateway"]
-    has_payments = any(keyword in content for keyword in payment_keywords)
+    has_payments = any(keyword in text for keyword in payment_keywords)
     payment_status = "Good" if has_payments else "Needs improvement"
     checks["online_payments"] = {"status": payment_status, "issue": "No online payment options detected"}
     if not has_payments:
@@ -765,7 +952,7 @@ def budget_red_flags_audit(crawl_result, url):
 
     # Generic email addresses
     email_pattern = re.compile(r'[\w\.-]+@(gmail|yahoo|hotmail|outlook|aol)\.com')
-    has_generic_email = bool(email_pattern.search(content))
+    has_generic_email = bool(email_pattern.search(text))
     email_status = "Good" if not has_generic_email else "Needs improvement"
     checks["generic_email"] = {"status": email_status, "issue": "Generic email address detected"}
     if has_generic_email:
@@ -773,7 +960,7 @@ def budget_red_flags_audit(crawl_result, url):
         issues.append("Generic email address detected")
 
     # No updates
-    recent_dates = re.findall(r'\b(202[3-5]|202[3-5]-\d{2})\b', content)
+    recent_dates = re.findall(r'\b(202[3-5]|202[3-5]-\d{2})\b', text)
     has_recent_updates = bool(recent_dates)
     update_status = "Good" if has_recent_updates else "Needs improvement"
     checks["recent_updates"] = {"status": update_status, "issue": "No recent updates (2023-2025) detected"}
@@ -783,7 +970,7 @@ def budget_red_flags_audit(crawl_result, url):
 
     # DIY website
     diy_indicators = ["welcome to my site", "under construction", "lorem ipsum", "this is a placeholder", "default template", "just another wordpress site"]
-    is_diy = any(indicator in content for indicator in diy_indicators)
+    is_diy = any(indicator in text for indicator in diy_indicators)
     diy_status = "Good" if not is_diy else "Needs improvement"
     checks["diy_website"] = {"status": diy_status, "issue": "DIY website with placeholder content detected"}
     if is_diy:
@@ -825,11 +1012,11 @@ def growth_signals_audit(crawl_result, url):
     issues = []
     checks = {}
     growth_signals = []
-    content = soup.get_text().lower()
+    text = soup.get_text().lower()
 
     # Job postings
     job_keywords = ["careers", "jobs", "we're hiring", "join our team", "employment"]
-    has_jobs = any(keyword in content for keyword in job_keywords)
+    has_jobs = any(keyword in text for keyword in job_keywords)
     if has_jobs:
         growth_signals.append("Job postings detected")
     job_status = "Good" if has_jobs else "Needs improvement"
@@ -837,7 +1024,7 @@ def growth_signals_audit(crawl_result, url):
 
     # Press releases/news
     press_keywords = ["press release", "newsroom", "media center", "latest news"]
-    has_press = any(keyword in content for keyword in press_keywords)
+    has_press = any(keyword in text for keyword in press_keywords)
     if has_press:
         growth_signals.append("Press releases/news detected")
     press_status = "Good" if has_press else "Needs improvement"
@@ -845,7 +1032,7 @@ def growth_signals_audit(crawl_result, url):
 
     # Facility expansion
     expansion_keywords = ["new facility", "expanding", "grand opening", "new location"]
-    has_expansion = any(keyword in content for keyword in expansion_keywords)
+    has_expansion = any(keyword in text for keyword in expansion_keywords)
     if has_expansion:
         growth_signals.append("Facility expansion detected")
     expansion_status = "Good" if has_expansion else "Needs improvement"
@@ -871,65 +1058,6 @@ def growth_signals_audit(crawl_result, url):
 
     return {"score": max(0, score), "issues": issues, "checks": checks, "growth_signals": growth_signals}
 
-def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
-    """Fetch competitor benchmarks from predefined lists or fall back to industry benchmarks."""
-    domain = urlparse(url).netloc
-    competitors = []
-
-    if industry_keyword != "Other":
-        competitors = fetch_competitors(industry_keyword)
-
-    uncrawled_competitors = [
-        url for url in competitors
-        if urlparse(url).netloc not in cache
-    ]
-    if uncrawled_competitors:
-        st.info(f"Crawling {len(uncrawled_competitors)} competitors for {industry_keyword}...")
-        progress_bar = st.progress(0)
-        competitor_results = crawl_competitors_parallel(uncrawled_competitors, progress_bar=progress_bar)
-        for url, crawl_result in competitor_results.items():
-            if crawl_result["html"]:
-                tech_audit = technical_audit(crawl_result)
-                business_audit = business_info_audit(crawl_result, url)
-                functional_audit = functional_gaps_audit(crawl_result, url)
-                seo_audit_result = seo_visibility_audit(crawl_result, url)
-                budget_audit = budget_red_flags_audit(crawl_result, url)
-                dead_end = dead_end_detection(url, crawl_result, whois_cache)
-                growth_audit = growth_signals_audit(crawl_result, url)
-
-                cache[urlparse(url).netloc] = {
-                    "url": url,
-                    "technical": tech_audit,
-                    "business": business_audit,
-                    "functional": functional_audit,
-                    "seo": seo_audit_result,
-                    "budget": budget_audit,
-                    "dead_end": dead_end,
-                    "growth": growth_audit,
-                    "industry_keyword": industry_keyword
-                }
-            else:
-                st.warning(f"Could not crawl competitor: {url}")
-
-    industry_competitors = [
-        data for domain, data in cache.items()
-        if data.get("industry_keyword") == industry_keyword
-    ]
-
-    if industry_competitors:
-        avg_scores = {
-            "technical": sum(c["technical"]["score"] for c in industry_competitors) / len(industry_competitors),
-            "business": sum(c["business"]["score"] for c in industry_competitors) / len(industry_competitors),
-            "functional": sum(c["functional"]["score"] for c in industry_competitors) / len(industry_competitors),
-            "seo": sum(c["seo"]["score"] for c in industry_competitors) / len(industry_competitors),
-            "budget": sum(c["budget"]["score"] for c in industry_competitors) / len(industry_competitors),
-            "dead_end": sum(c["dead_end"]["score"] for c in industry_competitors) / len(industry_competitors),
-            "growth": len([c for c in industry_competitors if c["growth"]["growth_signals"]]) / len(industry_competitors) * 100
-        }
-        return avg_scores
-    else:
-        return INDUSTRY_BENCHMARKS.get(industry_keyword, INDUSTRY_BENCHMARKS["Other"])
-
 # --- Main App ---
 def main():
     st.set_page_config(
@@ -952,6 +1080,41 @@ def main():
         The tool will analyze the site(s) and display a **scorecard**.
         """)
 
+    # --- Benchmark Management Section ---
+    st.markdown("### 🎯 Benchmark Website Management")
+    benchmark_websites = load_benchmark_websites()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Current Benchmark Websites:**")
+        if benchmark_websites:
+            for url in sorted(benchmark_websites):
+                st.write(f"- {url}")
+        else:
+            st.info("No benchmark websites loaded.")
+
+    with col2:
+        st.markdown("**Add/Remove Benchmark Websites**")
+        new_urls = st.text_area("Enter URLs to add (one per line):")
+        if st.button("Add Benchmark Websites"):
+            if new_urls:
+                new_websites = set(url.strip() for url in new_urls.split('\n') if url.strip())
+                updated_websites = benchmark_websites.union(new_websites)
+                save_benchmark_csv(updated_websites)
+                st.success(f"✅ Added {len(new_websites)} benchmark websites!")
+                st.rerun()
+
+        remove_urls = st.text_area("Enter URLs to remove (one per line):")
+        if st.button("Remove Benchmark Websites"):
+            if remove_urls:
+                remove_websites = set(url.strip() for url in remove_urls.split('\n') if url.strip())
+                updated_websites = benchmark_websites - remove_websites
+                save_benchmark_csv(updated_websites)
+                st.success(f"✅ Removed {len(remove_websites)} benchmark websites!")
+                st.rerun()
+
+    st.markdown("---")
+
     # --- MAIN FORM (Side-by-Side) ---
     form_col1, form_col2 = st.columns(2)
 
@@ -966,7 +1129,7 @@ def main():
         industry_keyword = st.selectbox(
             "Select Industry",
             industry_options,
-            index=len(industry_options)-6,
+            index=len(industry_options)-6 if len(industry_options) > 6 else 0,
             key="industry_dropdown"
         )
 
@@ -982,13 +1145,12 @@ def main():
     # --- SEPARATOR ---
     st.markdown("---")
 
-    
-
     # --- AUDIT LOGIC (Triggered by Run Audit Button) ---
     if 'run_audit_clicked' in locals() and run_audit_clicked:
         # Load caches
         cache = load_cache()
         whois_cache = load_whois_cache()
+        benchmark_websites = load_benchmark_websites()
 
         if website_url and csv_file:
             st.error("❌ **Error:** Please provide **either** a URL **or** a CSV file, not both.")
@@ -1007,17 +1169,17 @@ def main():
             if csv_file:
                 try:
                     df = pd.read_csv(csv_file)
-                    if "website_url" not in df.columns:
-                        st.error("❌ CSV must contain a 'website_url' column.")
+                    if "website_url" not in df.columns and "url" not in df.columns:
+                        st.error("❌ CSV must contain a 'website_url' or 'url' column.")
                         st.stop()
-                    urls = df["website_url"].apply(normalize_url).tolist()
-                    urls = list(set(urls))
+                    url_col = "website_url" if "website_url" in df.columns else "url"
+                    urls = df[url_col].apply(normalize_url).tolist()
+                    urls = list(set(urls))  # Remove duplicates
                     invalid_urls = [url for url in urls if not validate_url(url)]
                     if invalid_urls:
                         st.error(f"❌ Invalid URLs detected: {', '.join(invalid_urls)}")
                         st.stop()
                 except Exception as e:
-                    logger.error(f"Error reading CSV: {str(e)}")
                     st.error(f"❌ Error reading CSV: {str(e)}")
                     st.stop()
 
@@ -1032,12 +1194,12 @@ def main():
                 batch_urls = urls[(batch_num - 1) * BATCH_SIZE : batch_num * BATCH_SIZE]
                 batch_results = process_batch(
                     batch_urls, cache, whois_cache, industry_keyword,
-                    progress_bar, status_text, batch_num, total_batches
+                    progress_bar, status_text, batch_num, total_batches, benchmark_websites
                 )
                 all_results.extend(batch_results)
                 save_cache(cache)
                 save_whois_cache(whois_cache)
-                time.sleep(1)
+                time.sleep(1)  # Rate limiting
 
             progress_bar.empty()
             status_text.empty()
@@ -1046,118 +1208,97 @@ def main():
                 st.error("No valid results to display.")
                 st.stop()
 
-    # Helper function for score formatting
-    def format_score(score, decimals=3):
-        """Format score to maximum `decimals` decimal places."""
-        if isinstance(score, (int, float)):
-            formatted = f"{score:.{decimals}f}"
-            return formatted.rstrip('0').rstrip('.') if '.' in formatted else formatted
-        return str(score)
+            # Display results
+            for result in all_results:
+                st.markdown(f"### {result['url']}")
+                if result.get("is_benchmark", False):
+                    st.markdown("**🏷️ Benchmark Website**")
+                st.markdown(f"**Industry:** {result['industry_keyword']} | **Date:** {result['audit_date']}")
 
-    # Display scorecard
-    for result in all_results:
-        st.markdown(f"### {result['url']}")
-        st.markdown(f"**Industry:** {result['industry_keyword']} | **Date:** {result['audit_date']}")
+                # Display scorecard
+                categories = [
+                    {"key": "technical", "icon": "🔧", "name": "Technical"},
+                    {"key": "business", "icon": "🏢", "name": "Business Info"},
+                    {"key": "functional", "icon": "🛠️", "name": "Functional"},
+                    {"key": "seo", "icon": "🔍", "name": "SEO"},
+                    {"key": "budget", "icon": "💰", "name": "Budget"},
+                    {"key": "dead_end", "icon": "🚨", "name": "Dead End"}
+                ]
 
-        # Define all categories with their metrics
-        categories = [
-            {"key": "technical", "icon": "🔧", "name": "Technical", "benchmark_key": "technical"},
-            {"key": "business", "icon": "🏢", "name": "Business Info", "benchmark_key": "business"},
-            {"key": "functional", "icon": "🛠️", "name": "Functional", "benchmark_key": "functional"},
-            {"key": "seo", "icon": "🔍", "name": "SEO", "benchmark_key": "seo"},
-            {"key": "budget", "icon": "💰", "name": "Budget", "benchmark_key": "budget"},
-            {"key": "dead_end", "icon": "🚨", "name": "Dead End", "benchmark_key": "dead_end", "benchmark": 100}
-        ]
+                # First row of metrics
+                col1, col2, col3 = st.columns(3)
+                for idx, category in enumerate(categories[:3]):
+                    with [col1, col2, col3][idx]:
+                        benchmark = result["benchmarks"].get(category["key"], 70)
+                        delta = float(result[category["key"]]["score"]) - float(benchmark)
+                        st.metric(
+                            f"{category['icon']} {category['name']}",
+                            f"{result[category['key']]['score']:.1f}/100",
+                            delta=f"{delta:+.1f}"
+                        )
+                        if result[category["key"]]["issues"]:
+                            with st.expander(f"⚠️ {category['name']} Issues"):
+                                for issue in result[category["key"]]["issues"]:
+                                    st.write(f"- {issue}")
 
-        # Display first 3 categories
-        col1, col2, col3 = st.columns(3)
-        for idx, category in enumerate(categories[:3]):
-            with [col1, col2, col3][idx]:
-                benchmark = category.get("benchmark", result["benchmarks"].get(category["benchmark_key"], 70))
-                delta = float(result[category["key"]]["score"]) - float(benchmark)
-                st.metric(
-                    f"{category['icon']} {category['name']}",
-                    f"{format_score(result[category['key']]['score'])}/100",
-                    delta=f"{delta:+.{3}f}".rstrip('0').rstrip('.')
-                )
-                if result[category["key"]]["issues"]:
-                    with st.expander(f"⚠️ {category['name']} Issues"):
-                        for issue in result[category["key"]]["issues"]:
-                            st.write(f"- {issue}")
+                # Second row of metrics
+                col4, col5, col6 = st.columns(3)
+                for idx, category in enumerate(categories[3:]):
+                    with [col4, col5, col6][idx]:
+                        benchmark = result["benchmarks"].get(category["key"], 70)
+                        delta = float(result[category["key"]]["score"]) - float(benchmark)
+                        st.metric(
+                            f"{category['icon']} {category['name']}",
+                            f"{result[category['key']]['score']:.1f}/100",
+                            delta=f"{delta:+.1f}"
+                        )
+                        if result[category["key"]]["issues"]:
+                            with st.expander(f"⚠️ {category['name']} Issues"):
+                                for issue in result[category["key"]]["issues"]:
+                                    st.write(f"- {issue}")
 
-        # Display next 3 categories
-        col4, col5, col6 = st.columns(3)
-        for idx, category in enumerate(categories[3:]):
-            with [col4, col5, col6][idx]:
-                benchmark = category.get("benchmark", result["benchmarks"].get(category["benchmark_key"], 70))
-                delta = float(result[category["key"]]["score"]) - float(benchmark)
-                st.metric(
-                    f"{category['icon']} {category['name']}",
-                    f"{format_score(result[category['key']]['score'])}/100",
-                    delta=f"{delta:+.{3}f}".rstrip('0').rstrip('.')
-                )
-                if result[category["key"]]["issues"]:
-                    with st.expander(f"⚠️ {category['name']} Issues"):
-                        for issue in result[category["key"]]["issues"]:
-                            st.write(f"- {issue}")
-
-        # Growth signals
-        if result["growth"]["growth_signals"]:
-            st.success("✅ **Growth Signals Detected:** " + ", ".join(result["growth"]["growth_signals"]))
-        else:
-            st.warning("⚠️ **No Growth Signals Detected**")
-
-# Benchmark comparison
-        st.markdown("#### 📈 Benchmark Comparison")
-        benchmark_data = {
-                    "Category": ["Technical", "Business Info", "Functional", "SEO", "Budget", "Dead End"],
-                    "Analyzed Website Score": [
-                        result["technical"]["score"],
-                        result["business"]["score"],
-                        result["functional"]["score"],
-                        result["seo"]["score"],
-                        result["budget"]["score"],
-                        result["dead_end"]["score"]
-                    ],
-                    "Industry Benchmark": [
-                        result["benchmarks"].get("technical", 70),
-                        result["benchmarks"].get("business", 70),
-                        result["benchmarks"].get("functional", 70),
-                        result["benchmarks"].get("seo", 70),
-                        result["benchmarks"].get("budget", 70),
-                        100
-                    ]
+                # Benchmark comparison table
+                st.markdown("#### 📈 Benchmark Comparison")
+                benchmark_data = {
+                    "Category": [cat["name"] for cat in categories],
+                    "Your Score": [result[cat["key"]]["score"] for cat in categories],
+                    "Industry Benchmark": [result["benchmarks"].get(cat["key"], 70) for cat in categories]
                 }
-        benchmark_df = pd.DataFrame(benchmark_data)
-        def highlight_score(s):
-                    return ['background-color: #055913' if s[0] > s[1] else
-                            'background-color: #EB1212' if s[0] < s[1] else
-                            '' for s in zip(s, benchmark_df["Industry Benchmark"])]
-        styled_df = benchmark_df.style.apply(highlight_score, subset=["Analyzed Website Score"])
-        st.dataframe(styled_df, hide_index=True)
+                benchmark_df = pd.DataFrame(benchmark_data)
 
-        # Benchmark source
-        competitor_count = len([domain for domain, data in cache.items() if data.get("industry_keyword") == industry_keyword])
-        if competitor_count > 0:
-                    st.success(f"✅ Benchmarks based on **{competitor_count} competitors** in selected industry.")
-        else:
+                def highlight_score(s):
+                    return ['background-color: #d4edda' if s.Your_Score > s.Industry_Benchmark else
+                            'background-color: #f8d7da' if s.Your_Score < s.Industry_Benchmark else
+                            '' for _ in s.index]
+
+                styled_df = benchmark_df.style.apply(highlight_score, axis=1)
+                st.dataframe(styled_df, hide_index=True)
+
+                # Benchmark source info
+                competitor_count = len([d for d, data in cache.items() if data.get("industry_keyword") == industry_keyword and data.get("is_benchmark", False)])
+                if competitor_count > 0:
+                    st.success(f"✅ Benchmarks based on **{competitor_count} competitors** in {industry_keyword}.")
+                else:
                     st.info("ℹ️ Benchmarks based on **industry standards** (no competitors crawled yet).")
 
-        st.markdown("---")
+                # Growth signals
+                if result["growth"]["growth_signals"]:
+                    st.success("✅ **Growth Signals Detected:** " + ", ".join(result["growth"]["growth_signals"]))
+                else:
+                    st.warning("⚠️ **No Growth Signals Detected**")
 
-        st.info("💡 **For detailed CSV reports and pain point shortlists, use the Dashboard App.")                
+                st.markdown("---")
 
-
-# --- CACHE CLEANUP & REPORT ISSUES (Bottom Section) ---
+    # --- CACHE CLEANUP & REPORT ISSUES (Bottom Section) ---
     endcol1, end_col2 = st.columns(2)
     with endcol1:
-            if st.button("🧹 Clean Up Old Cache Entries"):
-                deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
-                total_deleted = sum(deleted_counts.values())
-                st.success(f"Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days: {deleted_counts}")
+        if st.button("🧹 Clean Up Old Cache Entries"):
+            deleted_counts = cleanup_old_cache_entries(CACHE_CLEANUP_DAYS)
+            total_deleted = sum(deleted_counts.values())
+            st.success(f"✅ Cleaned up {total_deleted} cache entries older than {CACHE_CLEANUP_DAYS} days")
 
     with end_col2:
-            st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
+        st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
 
 if __name__ == "__main__":
     main()

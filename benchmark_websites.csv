@@ -1,0 +1,61 @@
+url,industry_keyword
+https://www.amazon.com,E-commerce
+https://www.ebay.com,E-commerce
+https://www.etsy.com,E-commerce
+https://www.shopify.com,E-commerce
+https://www.walmart.com,E-commerce
+https://www.3m.com,Manufacturing
+https://www.ge.com,Manufacturing
+https://www.siemens.com,Manufacturing
+https://www.honeywell.com,Manufacturing
+https://www.bosch.com,Manufacturing
+https://www.target.com,Retail
+https://www.bestbuy.com,Retail
+https://www.ikea.com,Retail
+https://www.homedepot.com,Retail
+https://www.lowes.com,Retail
+https://www.microsoft.com,Technology
+https://www.apple.com,Technology
+https://www.google.com,Technology
+https://www.ibm.com,Technology
+https://www.oracle.com,Technology
+https://www.unitedhealthgroup.com,Healthcare
+https://www.kaiserpermanente.org,Healthcare
+https://www.cvshealth.com,Healthcare
+https://www.tenethealth.com,Healthcare
+https://www.hcahealthcare.com,Healthcare
+https://www.coursera.org,Education
+https://www.udemy.com,Education
+https://www.khanacademy.org,Education
+https://www.edx.org,Education
+https://www.linkedin.com/learning,Education
+https://www.chase.com,Finance
+https://www.bankofamerica.com,Finance
+https://www.wellsfargo.com,Finance
+https://www.citigroup.com,Finance
+https://www.goldmansachs.com,Finance
+https://www.booking.com,Travel
+https://www.expedia.com,Travel
+https://www.airbnb.com,Travel
+https://www.tripadvisor.com,Travel
+https://www.kayak.com,Travel
+https://www.mcdonalds.com,Food & Beverage
+https://www.starbucks.com,Food & Beverage
+https://www.chipotle.com,Food & Beverage
+https://www.papajohns.com,Food & Beverage
+https://www.dominos.com,Food & Beverage
+https://www.toyota.com,Automotive
+https://www.ford.com,Automotive
+https://www.honda.com,Automotive
+https://www.gm.com,Automotive
+https://www.tesla.com,Automotive
+https://www.zillow.com,Real Estate
+https://www.realtor.com,Real Estate
+https://www.redfin.com,Real Estate
+https://www.trulia.com,Real Estate
+https://www.remax.com,Real Estate
+https://www.zara.com,Fashion
+https://www.hm.com,Fashion
+https://www.gucci.com,Fashion
+https://www.louisvuitton.com,Fashion
+https://www.chanel.com,Fashion
