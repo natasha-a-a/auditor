@@ -1046,67 +1046,70 @@ def main():
                 st.error("No valid results to display.")
                 st.stop()
 
-            # Display scorecard
-            for result in all_results:
-                st.markdown(f"### {result['url']}")
-                st.markdown(f"**Industry:** {result['industry_keyword']} | **Date:** {result['audit_date']}")
+    # Helper function for score formatting
+    def format_score(score, decimals=3):
+        """Format score to maximum `decimals` decimal places."""
+        if isinstance(score, (int, float)):
+            formatted = f"{score:.{decimals}f}"
+            return formatted.rstrip('0').rstrip('.') if '.' in formatted else formatted
+        return str(score)
 
-                # Overall scores
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("🔧 Technical", f"{result['technical']['score']}/100",
-                             delta=f"{result['technical']['score'] - result['benchmarks'].get('technical', 70):+.0f}")
-                    if result["technical"]["issues"]:
-                        with st.expander("⚠️ Technical Issues"):
-                            for issue in result["technical"]["issues"]:
-                                st.write(f"- {issue}")
-                with col2:
-                    st.metric("🏢 Business Info", f"{result['business']['score']}/100",
-                             delta=f"{result['business']['score'] - result['benchmarks'].get('business', 70):+.0f}")
-                    if result["business"]["issues"]:
-                        with st.expander("⚠️ Business Info Issues"):
-                            for issue in result["business"]["issues"]:
-                                st.write(f"- {issue}")
-                with col3:
-                    st.metric("🛠️ Functional", f"{result['functional']['score']}/100",
-                             delta=f"{result['functional']['score'] - result['benchmarks'].get('functional', 70):+.0f}")
-                    if result["functional"]["issues"]:
-                        with st.expander("⚠️ Functional Gaps"):
-                            for issue in result["functional"]["issues"]:
-                                st.write(f"- {issue}")
+    # Display scorecard
+    for result in all_results:
+        st.markdown(f"### {result['url']}")
+        st.markdown(f"**Industry:** {result['industry_keyword']} | **Date:** {result['audit_date']}")
 
-                col4, col5, col6 = st.columns(3)
-                with col4:
-                    st.metric("🔍 SEO", f"{result['seo']['score']}/100",
-                             delta=f"{result['seo']['score'] - result['benchmarks'].get('seo', 70):+.0f}")
-                    if result["seo"]["issues"]:
-                        with st.expander("⚠️ SEO Issues"):
-                            for issue in result["seo"]["issues"]:
-                                st.write(f"- {issue}")
-                with col5:
-                    st.metric("💰 Budget", f"{result['budget']['score']}/100",
-                             delta=f"{result['budget']['score'] - result['benchmarks'].get('budget', 70):+.0f}")
-                    if result["budget"]["issues"]:
-                        with st.expander("⚠️ Budget Red Flags"):
-                            for issue in result["budget"]["issues"]:
-                                st.write(f"- {issue}")
-                with col6:
-                    st.metric("🚨 Dead End", f"{result['dead_end']['score']}/100",
-                             delta=f"{result['dead_end']['score'] - 100:+.0f}")
-                    if result["dead_end"]["issues"]:
-                        with st.expander("⚠️ Dead End Risks"):
-                            for issue in result["dead_end"]["issues"]:
-                                st.write(f"- {issue}")
+        # Define all categories with their metrics
+        categories = [
+            {"key": "technical", "icon": "🔧", "name": "Technical", "benchmark_key": "technical"},
+            {"key": "business", "icon": "🏢", "name": "Business Info", "benchmark_key": "business"},
+            {"key": "functional", "icon": "🛠️", "name": "Functional", "benchmark_key": "functional"},
+            {"key": "seo", "icon": "🔍", "name": "SEO", "benchmark_key": "seo"},
+            {"key": "budget", "icon": "💰", "name": "Budget", "benchmark_key": "budget"},
+            {"key": "dead_end", "icon": "🚨", "name": "Dead End", "benchmark_key": "dead_end", "benchmark": 100}
+        ]
 
-                # Growth signals
-                if result["growth"]["growth_signals"]:
-                    st.success("✅ **Growth Signals Detected:** " + ", ".join(result["growth"]["growth_signals"]))
-                else:
-                    st.warning("⚠️ **No Growth Signals Detected**")
+        # Display first 3 categories
+        col1, col2, col3 = st.columns(3)
+        for idx, category in enumerate(categories[:3]):
+            with [col1, col2, col3][idx]:
+                benchmark = category.get("benchmark", result["benchmarks"].get(category["benchmark_key"], 70))
+                delta = float(result[category["key"]]["score"]) - float(benchmark)
+                st.metric(
+                    f"{category['icon']} {category['name']}",
+                    f"{format_score(result[category['key']]['score'])}/100",
+                    delta=f"{delta:+.{3}f}".rstrip('0').rstrip('.')
+                )
+                if result[category["key"]]["issues"]:
+                    with st.expander(f"⚠️ {category['name']} Issues"):
+                        for issue in result[category["key"]]["issues"]:
+                            st.write(f"- {issue}")
 
-                # Benchmark comparison
-                st.markdown("#### 📈 Benchmark Comparison")
-                benchmark_data = {
+        # Display next 3 categories
+        col4, col5, col6 = st.columns(3)
+        for idx, category in enumerate(categories[3:]):
+            with [col4, col5, col6][idx]:
+                benchmark = category.get("benchmark", result["benchmarks"].get(category["benchmark_key"], 70))
+                delta = float(result[category["key"]]["score"]) - float(benchmark)
+                st.metric(
+                    f"{category['icon']} {category['name']}",
+                    f"{format_score(result[category['key']]['score'])}/100",
+                    delta=f"{delta:+.{3}f}".rstrip('0').rstrip('.')
+                )
+                if result[category["key"]]["issues"]:
+                    with st.expander(f"⚠️ {category['name']} Issues"):
+                        for issue in result[category["key"]]["issues"]:
+                            st.write(f"- {issue}")
+
+        # Growth signals
+        if result["growth"]["growth_signals"]:
+            st.success("✅ **Growth Signals Detected:** " + ", ".join(result["growth"]["growth_signals"]))
+        else:
+            st.warning("⚠️ **No Growth Signals Detected**")
+
+# Benchmark comparison
+        st.markdown("#### 📈 Benchmark Comparison")
+        benchmark_data = {
                     "Category": ["Technical", "Business Info", "Functional", "SEO", "Budget", "Dead End"],
                     "Analyzed Website Score": [
                         result["technical"]["score"],
@@ -1125,24 +1128,24 @@ def main():
                         100
                     ]
                 }
-                benchmark_df = pd.DataFrame(benchmark_data)
-                def highlight_score(s):
+        benchmark_df = pd.DataFrame(benchmark_data)
+        def highlight_score(s):
                     return ['background-color: #055913' if s[0] > s[1] else
                             'background-color: #EB1212' if s[0] < s[1] else
                             '' for s in zip(s, benchmark_df["Industry Benchmark"])]
-                styled_df = benchmark_df.style.apply(highlight_score, subset=["Analyzed Website Score"])
-                st.dataframe(styled_df, hide_index=True)
+        styled_df = benchmark_df.style.apply(highlight_score, subset=["Analyzed Website Score"])
+        st.dataframe(styled_df, hide_index=True)
 
-                # Benchmark source
-                competitor_count = len([domain for domain, data in cache.items() if data.get("industry_keyword") == industry_keyword])
-                if competitor_count > 0:
+        # Benchmark source
+        competitor_count = len([domain for domain, data in cache.items() if data.get("industry_keyword") == industry_keyword])
+        if competitor_count > 0:
                     st.success(f"✅ Benchmarks based on **{competitor_count} competitors** in selected industry.")
-                else:
+        else:
                     st.info("ℹ️ Benchmarks based on **industry standards** (no competitors crawled yet).")
 
-                st.markdown("---")
+        st.markdown("---")
 
-            st.info("💡 **For detailed CSV reports and pain point shortlists, use the Dashboard App.")
+        st.info("💡 **For detailed CSV reports and pain point shortlists, use the Dashboard App.")                
 
 
 # --- CACHE CLEANUP & REPORT ISSUES (Bottom Section) ---
