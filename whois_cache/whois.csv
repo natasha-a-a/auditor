@@ -5,3 +5,4 @@ www.siemens.com,"{""expiring_soon"": false, ""error"": ""can't subtract offset-n
 www.bosch.com,"{""expiring_soon"": false, ""error"": ""can't subtract offset-naive and offset-aware datetimes"", ""timestamp"": ""2026-08-30 00:53:21""}",2026-08-30 00:53:21
 www.euchner.com,"{""expiring_soon"": false, ""error"": ""WHOIS lookup failed"", ""timestamp"": ""2026-08-30 14:53:22""}",2026-08-30 14:53:22
 odu-connectors.com,"{""expiring_soon"": false, ""error"": ""WHOIS lookup failed"", ""timestamp"": ""2026-09-03 15:52:05""}",2026-09-03 15:52:05
+www.werma.com,"{""expiring_soon"": false, ""error"": ""WHOIS lookup failed"", ""timestamp"": ""2026-09-03 17:49:05""}",2026-09-03 17:49:05
