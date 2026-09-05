@@ -1,0 +1,45 @@
+language,category,check_name,keywords
+en,business,products_services,our products|our services|products|services
+de,business,products_services,unsere produkte|unsere dienstleistungen|produkte|dienstleistungen
+en,business,company_info,about us|our story|our team|company history|who we are|company
+de,business,company_info,über uns|unsere geschichte|unser team|unternehmen|wer wir sind
+en,business,certifications,iso 9001|iso 14001|reach|rohs|safety data sheet|sds|ce marking|fda|ul listed
+de,business,certifications,iso 9001|iso 14001|reach|rohs|sicherheitsdatenblatt|sds|ce-kennzeichnung|fda
+en,business,testimonials,testimonial|case study|client success|customer story|client testimonials
+de,business,testimonials,referenz|erfolgsgeschichte|kundenerfolg|kundenstimme|kundenreferenz
+en,functional,contact_form,contact us|get in touch|send a message|request information|reach out|connect with us
+de,functional,contact_form,kontakt|kontaktieren sie uns|nachricht senden|anfrage|kontakt aufnehmen
+en,functional,rfq_system,request for quote|get a quote|rfq|quote request|request pricing|request a quote
+de,functional,rfq_system,angebotsanfrage|angebot anfordern|rfq|preisanfrage|angebot anfragen
+en,functional,ecommerce,add to cart|buy now|shop now|checkout|add to basket|purchase|shop|order now
+de,functional,ecommerce,in den warenkorb|jetzt kaufen|jetzt shoppen|zur kasse|kaufen|jetzt bestellen|shop
+en,functional,blog,blog|news|resources|articles|insights|latest news|company blog
+de,functional,blog,blog|nachrichten|ressourcen|artikel|einblicke|neuigkeiten|unternehmensblog
+en,seo,local_seo,google my business|google maps|maps.googleapis.com|gmb
+de,seo,local_seo,google my business|google maps|maps.googleapis.com|gmb
+en,seo,analytics,google analytics|ga.js|gtag|universal analytics|UA-|G-|analytics.js
+de,seo,analytics,google analytics|ga.js|gtag|universal analytics|UA-|G-|analytics.js
+en,ux,clear_ctas,get started|learn more|contact us|buy now|sign up|register|download|request quote|get a quote|start now
+de,ux,clear_ctas,jetzt starten|lernen sie mehr|kontakt|jetzt kaufen|anmelden|registrieren|download|angebot anfordern|jetzt starten
+en,ux,form_accessibility,first name|last name|email|phone|message|name|e-mail|telephone|your name|your email
+de,ux,form_accessibility,vorname|nachname|e-mail|telefon|nachricht|name|email|ihre e-mail|ihr name
+en,ux,navigation_structure,home|menu|navigation|about|contact|about us|contact us|homepage
+de,ux,navigation_structure,startseite|menü|navigation|über uns|kontakt|home|start
+en,growth,job_postings,careers|jobs|we're hiring|join our team|employment|job openings|work with us
+de,growth,job_postings,karriere|stellen|wir stellen ein|werden sie teil unseres teams|jobangebote|arbeiten sie mit uns
+en,growth,press_releases,press release|newsroom|media center|latest news|press|news center
+de,growth,press_releases,presseerklärung|newsroom|medienzentrum|neuigkeiten|presse|nachrichten
+en,growth,facility_expansion,new facility|expanding|grand opening|new location|new office|new plant
+de,growth,facility_expansion,neue anlage|erweiterung|eröffnung|neuer standort|neues büro|neues werk
+en,growth,linkedin_presence,linkedin.com|in/|linkedin|follow us on linkedin
+de,growth,linkedin_presence,linkedin.com|in/|linkedin|folgen sie uns auf linkedin
+en,growth,google_my_business,google.com/maps|google maps|maps.googleapis.com|gmb
+de,growth,google_my_business,google.com/maps|google maps|maps.googleapis.com|gmb
+en,budget,online_payments,stripe|paypal|square|checkout.com|payment gateway|pay now|credit card
+de,budget,online_payments,stripe|paypal|square|checkout|zahlungsabwicklung|jetzt zahlen|kreditkarte
+en,budget,generic_email,@gmail.com|@yahoo.com|@hotmail.com|@outlook.com|@aol.com|@protonmail.com
+de,budget,generic_email,@gmail.com|@yahoo.com|@hotmail.com|@outlook.com|@aol.com|@protonmail.com
+en,budget,recent_updates,2023|2024|2025|2026|2023-|2024-|2025-|2026-
+de,budget,recent_updates,2023|2024|2025|2026|2023-|2024-|2025-|2026-
+en,budget,diy_website,welcome to my site|under construction|lorem ipsum|this is a placeholder|default template|coming soon
+de,budget,diy_website,willkommen auf meiner seite|in bearbeitung|lorem ipsum|dies ist ein platzhalter|standard-vorlage|bald verfügbar
