@@ -19,9 +19,15 @@ import whois
 import numpy as np
 
 # --- Constants ---
-GITHUB_REPO = "natasha-a-a/auditor"
-GITHUB_BRANCH = "main"
+GITHUB_REPO = st.secrets["GITHUB_REPO"]
+GITHUB_BRANCH = st.secrets["GITHUB_BRANCH"]
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
+
+# Validate secrets
+if not GITHUB_REPO or not GITHUB_BRANCH:
+    st.error("❌ GitHub repository and branch must be configured in secrets.toml")
+    st.stop()
+
 GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_WHOIS_CSV_URL = f"{GITHUB_RAW_BASE}/whois_cache/whois.csv"
 GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
@@ -291,7 +297,6 @@ WHOIS_RETRIES = int(thresholds.get("WHOIS_RETRIES", 2))
 
 # --- GitHub Auto-Commit Functions ---
 def get_github_token():
-    """Get GitHub token from Streamlit secrets."""
     return st.secrets.get("GITHUB_TOKEN")
 
 def github_api_request(method, endpoint, data=None):
