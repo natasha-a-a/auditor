@@ -1145,6 +1145,7 @@ def ux_audit(crawl_result, url, language='en'):
     return {"score": max(0, score), "issues": issues, "checks": checks}
 
 # --- Main Processing Function ---
+
 def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, status_text, batch_num, total_batches, benchmark_websites):
     """Process a batch of URLs with language detection and UX audit."""
     results = []
@@ -1167,15 +1168,15 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
         # Detect language
         language = detect_language(crawl_result["html"], crawl_result["headers"])
 
-        # Run all audits with language parameter
-        tech_audit = technical_audit(crawl_result)
-        business_audit = business_info_audit(crawl_result, url, language)
-        functional_audit = functional_gaps_audit(crawl_result, url, language)
+        # Run all audits
+        technical_audit_result = technical_audit(crawl_result)
+        business_audit_result = business_info_audit(crawl_result, url, language)
+        functional_audit_result = functional_gaps_audit(crawl_result, url, language)
         seo_audit_result = seo_visibility_audit(crawl_result, url, language)
-        budget_audit = budget_red_flags_audit(crawl_result, url, language)
-        ux_audit = ux_audit(crawl_result, url, language)
-        dead_end = dead_end_detection(url, crawl_result, whois_cache, language)
-        growth_audit = growth_signals_audit(crawl_result, url, language)
+        budget_audit_result = budget_red_flags_audit(crawl_result, url, language)
+        ux_audit_result = ux_audit(crawl_result, url, language)
+        dead_end_result = dead_end_detection(url, crawl_result, whois_cache, language)
+        growth_audit_result = growth_signals_audit(crawl_result, url, language)
 
         benchmarks = get_competitor_benchmarks(url, industry_keyword, cache, whois_cache)
 
@@ -1186,14 +1187,14 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
             "industry_keyword": industry_keyword,
             "is_benchmark": url in benchmark_websites,
             "crawl": crawl_result,
-            "technical": tech_audit,
-            "business": business_audit,
-            "functional": functional_audit,
+            "technical": technical_audit_result,
+            "business": business_audit_result,
+            "functional": functional_audit_result,
             "seo": seo_audit_result,
-            "ux": ux_audit,
-            "budget": budget_audit,
-            "dead_end": dead_end,
-            "growth": growth_audit,
+            "ux": ux_audit_result,
+            "budget": budget_audit_result,
+            "dead_end": dead_end_result,
+            "growth": growth_audit_result,
             "benchmarks": benchmarks
         }
         results.append(result)
