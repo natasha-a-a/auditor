@@ -19,9 +19,9 @@ if not GITHUB_REPO or not GITHUB_BRANCH:
     st.stop()
 
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
-GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
-GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
-GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv"
+GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv?t={int(datetime.now().timestamp())}"
+GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv?t={int(datetime.now().timestamp())}"
+GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv?t={int(datetime.now().timestamp())}"
 
 # --- Helper Functions ---
 def format_score(score, decimals=3):
@@ -31,7 +31,7 @@ def format_score(score, decimals=3):
         return formatted.rstrip('0').rstrip('.') if '.' in formatted else formatted
     return str(score)
 
-def fetch_csv_from_github(url, sep=';'):
+def fetch_csv_from_github(url, sep=None):
     """Fetch CSV file directly from GitHub raw URL with proper error handling."""
     try:
         response = requests.get(url)
@@ -70,7 +70,6 @@ def load_recommendations():
     try:
         df = fetch_csv_from_github(GITHUB_RECOMMENDATIONS_CSV_URL, sep=';')
         if not df.empty and all(col in df.columns for col in expected_columns):
-            st.info(f"✅ Loaded {len(df)} recommendations from GitHub CSV")
             return df
     except Exception as e:
         st.warning(f"⚠️ GitHub recommendations CSV error: {str(e)}")
@@ -81,9 +80,10 @@ def load_github_cache():
     """Load audit cache from GitHub CSV with error handling."""
     df = fetch_csv_from_github(GITHUB_AUDIT_CSV_URL, sep=',')
     if df.empty:
+        st.warning("⚠️ Audit CSV is empty or failed to load")
         return {}
     if not all(col in df.columns for col in ['domain', 'data', 'timestamp']):
-        st.warning("⚠️ Audit CSV missing required columns")
+        st.warning(f"⚠️ Audit CSV missing required columns. Found: {list(df.columns)}")
         return {}
 
     benchmark_websites = load_benchmark_websites()
@@ -368,7 +368,6 @@ def main():
                         st.write(f"- **Status:** {display_status}")
                         st.write(f"- **What I Found:** {issue}")
 
-                        # FIXED: Always show business impact, only show recommendation for non-Good
                         st.write(f"- **Business Impact:** {get_business_impact(cat_key, check_name)}")
                         if display_status != "Good":
                             st.write(f"- **Recommendation:** {get_recommendation(cat_key, check_name)}")
