@@ -1293,9 +1293,9 @@ def main():
                             f"{result.get(category['key'], {}).get('score', 0):.1f}/100",                            
                             delta=f"{delta:+.1f}"
                         )
-                        if result[category["key"]]["issues"]:
+                        if result.get(category["key"], {}).get("issues"):                            
                             with st.expander(f"⚠️ {category['name']} Issues"):
-                                for issue in result[category["key"]]["issues"]:
+                                for issue in result.get(category["key"], {}).get("issues", []):                                    
                                     st.write(f"- {issue}")
 
                 col4, col5, col6 = st.columns(3)
@@ -1308,9 +1308,9 @@ def main():
                             f"{result.get(category['key'], {}).get('score', 0):.1f}/100",                            
                             delta=f"{delta:+.1f}"
                         )
-                        if result[category["key"]]["issues"]:
+                        if result.get(category["key"], {}).get("issues"):                            
                             with st.expander(f"⚠️ {category['name']} Issues"):
-                                for issue in result[category["key"]]["issues"]:
+                                for issue in result.get(category["key"], {}).get("issues", []):                                    
                                     st.write(f"- {issue}")
 
                 st.markdown("#### 📈 Benchmark Comparison")
