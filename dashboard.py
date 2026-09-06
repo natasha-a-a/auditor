@@ -26,8 +26,8 @@ def format_score(score, decimals=3):
         return formatted.rstrip('0').rstrip('.') if '.' in formatted else formatted
     return str(score)
 
-def fetch_csv_from_github(url, sep=','):
-    """Fetch CSV file directly from GitHub raw URL."""
+def fetch_csv_from_github(url, sep=';'):
+    """Fetch CSV file directly from GitHub raw URL with proper error handling."""
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -35,16 +35,22 @@ def fetch_csv_from_github(url, sep=','):
     except requests.exceptions.RequestException as e:
         st.warning(f"⚠️ Could not fetch {url}: {str(e)}")
         return pd.DataFrame()
+    except Exception as e:
+        st.warning(f"⚠️ CSV parsing error for {url}: {str(e)}")
+        return pd.DataFrame()
 
 def load_benchmark_websites():
     """Load benchmark websites from GitHub CSV."""
-    df = fetch_csv_from_github(GITHUB_BENCHMARK_CSV_URL)
+    df = fetch_csv_from_github(GITHUB_BENCHMARK_CSV_URL, sep=',')
     if df.empty:
+        return set()
+    if 'url' not in df.columns:
+        st.warning("⚠️ Benchmark CSV missing 'url' column")
         return set()
     return set(df['url'].tolist())
 
 def load_recommendations():
-    """Load recommendations from CSV (local or GitHub) with semicolon delimiter."""
+    """Load recommendations from CSV with semicolon delimiter and validation."""
     expected_columns = ['industry', 'category', 'check_name', 'business_impact', 'recommendation', 'priority']
     local_path = Path("recommendations.csv")
 
@@ -55,6 +61,8 @@ def load_recommendations():
             if not df.empty and all(col in df.columns for col in expected_columns):
                 st.info(f"✅ Loaded {len(df)} recommendations from local CSV")
                 return df
+            else:
+                st.warning(f"⚠️ Local CSV has wrong format. Expected: {expected_columns}, Got: {list(df.columns)}")
         except Exception as e:
             st.warning(f"⚠️ Local recommendations CSV error: {str(e)}")
 
@@ -64,47 +72,60 @@ def load_recommendations():
         if not df.empty and all(col in df.columns for col in expected_columns):
             st.info(f"✅ Loaded {len(df)} recommendations from GitHub CSV")
             return df
+        else:
+            st.warning(f"⚠️ GitHub CSV has wrong format. Expected: {expected_columns}, Got: {list(df.columns)}")
     except Exception as e:
         st.warning(f"⚠️ GitHub recommendations CSV error: {str(e)}")
 
-    # Return empty DataFrame with correct columns
     return pd.DataFrame(columns=expected_columns)
 
 def load_github_cache():
-    """Load audit cache from GitHub CSV."""
-    df = fetch_csv_from_github(GITHUB_AUDIT_CSV_URL)
+    """Load audit cache from GitHub CSV with error handling."""
+    df = fetch_csv_from_github(GITHUB_AUDIT_CSV_URL, sep=',')
     if df.empty:
         return {}
+    if not all(col in df.columns for col in ['domain', 'data', 'timestamp']):
+        st.warning("⚠️ Audit CSV missing required columns")
+        return {}
+
     benchmark_websites = load_benchmark_websites()
-    return {
-        row["domain"]: {
-            **json.loads(row["data"]),
-            "timestamp": row["timestamp"],
-            "is_benchmark": row["domain"] in benchmark_websites
-        }
-        for _, row in df.iterrows()
-    }
+    cache = {}
+    for _, row in df.iterrows():
+        try:
+            cache[row["domain"]] = {
+                **json.loads(row["data"]),
+                "timestamp": row["timestamp"],
+                "is_benchmark": row["domain"] in benchmark_websites
+            }
+        except json.JSONDecodeError:
+            st.warning(f"⚠️ Invalid JSON in audit data for {row['domain']}")
+            continue
+    return cache
 
 def extract_contact_info(html, url):
     """Extract contact email and physical address from HTML."""
     if not html:
         return None, None
-    soup = BeautifulSoup(html, 'html.parser')
-    text = soup.get_text()
-    email_pattern = r'[\w\.-]+@[\w\.-]+\.\w+'
-    emails = re.findall(email_pattern, text)
-    contact_email = None
-    generic_domains = ['gmail', 'yahoo', 'hotmail', 'outlook', 'aol', 'protonmail']
-    for email in emails:
-        if not any(domain in email.lower() for domain in generic_domains):
-            contact_email = email
-            break
-    if not contact_email and emails:
-        contact_email = emails[0]
-    address_pattern = r'\d+\s[\w\s]+,\s[\w\s]+,\s[A-Z]{2}\s\d{5}(?:-\d{4})?'
-    address_match = re.search(address_pattern, text)
-    physical_address = address_match.group(0) if address_match else None
-    return contact_email, physical_address
+    try:
+        soup = BeautifulSoup(html, 'html.parser')
+        text = soup.get_text()
+        email_pattern = r'[\w\.-]+@[\w\.-]+\.\w+'
+        emails = re.findall(email_pattern, text)
+        contact_email = None
+        generic_domains = ['gmail', 'yahoo', 'hotmail', 'outlook', 'aol', 'protonmail']
+        for email in emails:
+            if not any(domain in email.lower() for domain in generic_domains):
+                contact_email = email
+                break
+        if not contact_email and emails:
+            contact_email = emails[0]
+
+        address_pattern = r'\d+\s[\w\s]+,\s[\w\s]+,\s[A-Z]{2}\s\d{5}(?:-\d{4})?'
+        address_match = re.search(address_pattern, text)
+        physical_address = address_match.group(0) if address_match else None
+        return contact_email, physical_address
+    except Exception:
+        return None, None
 
 # Load recommendations at startup
 RECOMMENDATIONS_DF = load_recommendations()
@@ -118,14 +139,13 @@ def get_why_it_matters(category, check_name):
         ]
         if not filtered.empty:
             return filtered.iloc[0]['business_impact']
-    # Category-based fallbacks
     fallbacks = {
         "technical": "Critical for security, performance, and user trust. Directly impacts conversions and SEO rankings.",
         "business": "Essential for credibility, conversions, and customer trust. Missing information loses 30-50% of potential leads.",
         "functional": "Important for user experience and business operations. Missing functionality reduces conversions by 20-40%.",
         "seo": "Vital for search visibility and organic traffic growth. Proper SEO can increase traffic by 100-200%.",
+        "ux": "Essential for user experience and accessibility. Poor UX increases bounce rates by 40-60%.",
         "budget": "Key for sustainable digital growth and risk management. Professional solutions convert 2-3x better than DIY.",
-        "dead_end": "Critical for business continuity and domain health. Domain issues can result in complete loss of online presence.",
         "growth": "Indicates active business expansion and momentum. Growth signals attract customers and partners."
     }
     return fallbacks.get(category, "Important for overall digital performance and business results")
@@ -139,14 +159,13 @@ def get_recommendation(category, check_name):
         ]
         if not filtered.empty:
             return filtered.iloc[0]['recommendation']
-    # Category-based fallbacks
     fallbacks = {
         "technical": "We will implement technical improvements to address security, performance, and compatibility issues.",
         "business": "We will enhance business information presentation to build trust and credibility with visitors.",
         "functional": "We will add or improve functionality to drive user engagement and conversions.",
         "seo": "We will optimize for better search visibility, rankings, and organic traffic growth.",
+        "ux": "We will improve user experience and accessibility to reduce bounce rates and increase conversions.",
         "budget": "We will address budget-related constraints to support sustainable digital growth.",
-        "dead_end": "We will resolve this critical issue to prevent business disruption and domain problems.",
         "growth": "We will leverage this growth opportunity for competitive advantage and business expansion."
     }
     return fallbacks.get(category, "We will address this to improve digital performance and business results")
@@ -160,14 +179,13 @@ def get_business_impact(category, check_name):
         ]
         if not filtered.empty:
             return filtered.iloc[0]['business_impact']
-    # Category-based fallbacks
     fallbacks = {
         "technical": "Improves security, performance, and user experience leading to higher conversions and better SEO.",
         "business": "Enhances credibility and customer trust resulting in 30-50% higher conversion rates.",
         "functional": "Boosts user engagement and conversions by 20-40% through improved functionality.",
         "seo": "Increases organic traffic and search visibility by 100-200% through better optimization.",
+        "ux": "Improves user experience and accessibility, reducing bounce rates by 40-60% and increasing conversions.",
         "budget": "Supports sustainable digital growth and prevents revenue loss from outdated solutions.",
-        "dead_end": "Prevents business disruption and domain issues that could result in complete loss of online presence.",
         "growth": "Provides competitive advantage through active business growth and expansion."
     }
     return fallbacks.get(category, "Enhances overall digital presence and business results")
@@ -193,7 +211,7 @@ def get_last_n_entries(cache, n=10):
     return dict(sorted_entries[:n])
 
 def generate_full_csv(cache, include_benchmarks=False):
-    """Generate a CSV of all audit data in the cache."""
+    """Generate a CSV of all audit data in the cache with dead_end merged into technical."""
     user_cache = cache if include_benchmarks else filter_user_audits(cache)
     csv_data = []
     for domain, data in user_cache.items():
@@ -201,9 +219,13 @@ def generate_full_csv(cache, include_benchmarks=False):
         audit_date = data.get("audit_date", data.get("timestamp", "N/A"))
         benchmarks = data.get("benchmarks", {})
 
-        for category in ["technical", "business", "functional", "seo", "budget"]:
-            for check_name, check_data in data.get(category, {}).get("checks", {}).items():
-                # Get original status and issue
+        # Process all categories
+        for category in ["technical", "business", "functional", "seo", "ux", "budget"]:
+            category_data = data.get(category, {})
+            checks = category_data.get("checks", {})
+            score = category_data.get("score", 0)
+
+            for check_name, check_data in checks.items():
                 status = check_data.get("status", "N/A")
                 issue = check_data.get("issue", "No issues")
 
@@ -221,37 +243,21 @@ def generate_full_csv(cache, include_benchmarks=False):
                               "Business Presentation" if category == "business" else
                               "Functional Gaps" if category == "functional" else
                               "SEO & Visibility" if category == "seo" else
+                              "UX & Accessibility" if category == "ux" else
                               "Budget & Resources",
                     "check": check_name.replace("_", " ").title(),
-                    "status": status,  # Use corrected status
+                    "status": status,
                     "what_i_found": issue,
                     "why_it_matters": get_why_it_matters(category, check_name) if status != "Good" else "",
                     "recommendation": get_recommendation(category, check_name) if status != "Good" else "",
                     "business_impact": get_business_impact(category, check_name) if status != "Good" else "",
-                    "priority": status,  # Use corrected status for priority too
-                    "score": data.get(category, {}).get("score", 0),
+                    "priority": status,
+                    "score": score,
                     "benchmark": benchmarks.get(category, 70),
-                    "vs_benchmark": "Above" if data.get(category, {}).get("score", 0) > benchmarks.get(category, 70) else "Below"
+                    "vs_benchmark": "Above" if score > benchmarks.get(category, 70) else "Below"
                 })
 
-        for check_name, check_data in data.get("dead_end", {}).get("checks", {}).items():
-            csv_data.append({
-                "page_url": url,
-                "audit_date": audit_date,
-                "audit_type": "Dead End Detection",
-                "section": "Domain Health",
-                "check": check_name.replace("_", " ").title(),
-                "status": check_data.get("status", "N/A"),
-                "what_i_found": check_data.get("issue", "No issues"),
-                "why_it_matters": get_why_it_matters("dead_end", check_name) if check_data.get("status", "N/A") != "Good" else "",
-                "recommendation": get_recommendation("dead_end", check_name) if check_data.get("status", "N/A") != "Good" else "",
-                "business_impact": get_business_impact("dead_end", check_name) if check_data.get("status", "N/A") != "Good" else "",
-                "priority": check_data.get("status", "N/A"),
-                "score": data.get("dead_end", {}).get("score", 0),
-                "benchmark": 100,
-                "vs_benchmark": "Above" if data.get("dead_end", {}).get("score", 0) == 100 else "Below"
-            })
-
+        # Process growth signals (saved but not displayed in UI)
         growth_signals = data.get("growth", {}).get("growth_signals", [])
         if growth_signals:
             csv_data.append({
@@ -280,8 +286,8 @@ def generate_painpoint_csv_with_contact(cache):
         "Business Info": "Business Info Gaps",
         "Functional": "Functional Gaps",
         "SEO": "SEO Weaknesses",
-        "Budget": "Budget Constraints",
-        "Dead End": "Dead End Risks"
+        "UX": "UX & Accessibility Issues",
+        "Budget": "Budget Constraints"
     }
 
     painpoint_data = []
@@ -289,13 +295,14 @@ def generate_painpoint_csv_with_contact(cache):
         html = data.get('crawl', {}).get('html', '')
         contact_email, physical_address = extract_contact_info(html, data.get('url', ''))
 
+        # Calculate scores (technical includes dead_end)
         scores = {
             "Technical": data.get("technical", {}).get("score", 0),
             "Business Info": data.get("business", {}).get("score", 0),
             "Functional": data.get("functional", {}).get("score", 0),
             "SEO": data.get("seo", {}).get("score", 0),
-            "Budget": data.get("budget", {}).get("score", 0),
-            "Dead End": data.get("dead_end", {}).get("score", 0)
+            "UX": data.get("ux", {}).get("score", 0),
+            "Budget": data.get("budget", {}).get("score", 0)
         }
         worst_category = min(scores, key=scores.get)
         category = category_map[worst_category]
@@ -305,7 +312,8 @@ def generate_painpoint_csv_with_contact(cache):
             "Pain Point": category,
             "Contact Email": contact_email or "Not found",
             "Physical Address": physical_address or "Not found",
-            "Industry": data.get("industry_keyword", "Other")
+            "Industry": data.get("industry_keyword", "Other"),
+            "Growth Signals": ", ".join(data.get("growth", {}).get("growth_signals", []))
         })
 
     return pd.DataFrame(painpoint_data)
@@ -359,19 +367,19 @@ def main():
 
         # --- In-Depth Scorecard for Last Audited Website ---
         st.subheader(f"🔍 In-Depth Analysis: {last_data.get('url', 'N/A')}")
-
         st.markdown(f"**Industry:** {last_data.get('industry_keyword', 'Other')} | **Date:** {last_data.get('audit_date', last_data.get('timestamp', 'N/A'))}")
 
         # Scorecard with explanations
         st.markdown("### 📊 Detailed Scorecard")
 
+        # Categories - dead_end is now part of technical
         categories = [
             ("technical", "🔧 Technical", "Performance & Security"),
             ("business", "🏢 Business Info", "Business Presentation"),
             ("functional", "🛠️ Functional", "Functional Gaps"),
             ("seo", "🔍 SEO", "SEO & Visibility"),
-            ("budget", "💰 Budget", "Budget & Resources"),
-            ("dead_end", "🚨 Dead End", "Domain Health")
+            ("ux", "🎨 UX", "UX & Accessibility"),
+            ("budget", "💰 Budget", "Budget & Resources")
         ]
 
         for cat_key, icon, section in categories:
@@ -383,24 +391,24 @@ def main():
                     for check_name, check_data in checks.items():
                         st.markdown(f"**{check_name.replace('_', ' ').title()}**")
                         status = check_data.get('status', 'N/A')
+                        issue = check_data.get('issue', 'No issues')
 
                         # Correct status display for specific checks
-                        if check_name in ['flash_elements', 'outdated_plugins']:
-                            display_status = "Needs improvement" if check_name in check_data else status
-                        elif check_name == 'ssl_tls' and status == 'Good':
-                            display_status = "Critical" if not last_data.get('crawl', {}).get('ssl_valid', True) else status
+                        if check_name in ['flash_elements', 'outdated_plugins'] and 'detected' in issue.lower():
+                            display_status = 'Needs improvement'
+                        elif check_name == 'ssl_tls' and not last_data.get('crawl', {}).get('ssl_valid', True):
+                            display_status = 'Critical'
                         else:
                             display_status = status
 
                         st.write(f"- **Status:** {display_status}")
-                        st.write(f"- **What I Found:** {check_data.get('issue', 'No issues')}")
+                        st.write(f"- **What I Found:** {issue}")
 
                         # Only show recommendations if status is not Good
-                        if status != "Good":
+                        if display_status != "Good":
                             st.write(f"- **Why It Matters:** {get_why_it_matters(cat_key, check_name)}")
                             st.write(f"- **Recommendation:** {get_recommendation(cat_key, check_name)}")
                             st.write(f"- **Business Impact:** {get_business_impact(cat_key, check_name)}")
-
                         st.markdown("---")
                 else:
                     st.info("No specific checks recorded for this category.")
@@ -414,13 +422,6 @@ def main():
                     delta=f"{delta:+.1f}",
                     delta_color="normal"
                 )
-
-        # Growth signals
-        growth_signals = last_data.get("growth", {}).get("growth_signals", [])
-        if growth_signals:
-            st.success("✅ **Growth Signals Detected:** " + ", ".join(growth_signals))
-        else:
-            st.warning("⚠️ **No Growth Signals Detected**")
 
         st.markdown("---")
 
@@ -468,13 +469,14 @@ def main():
             "Business Info": [],
             "Functional": [],
             "SEO": [],
-            "Budget": [],
-            "Dead End": []
+            "UX": [],
+            "Budget": []
         }
 
         for domain, data in last_10_entries.items():
             for cat in category_scores.keys():
-                score = data.get(cat.lower().replace(" ", "_"), {}).get("score", 0)
+                cat_key = cat.lower().replace(" ", "_")
+                score = data.get(cat_key, {}).get("score", 0)
                 category_scores[cat].append(score)
 
         # Calculate and display statistics
@@ -501,15 +503,14 @@ def main():
             "Business Info": data.get("business", {}).get("score", 0),
             "Functional": data.get("functional", {}).get("score", 0),
             "SEO": data.get("seo", {}).get("score", 0),
-            "Budget": data.get("budget", {}).get("score", 0),
-            "Dead End": data.get("dead_end", {}).get("score", 0),
-            "Growth Signals": len(data.get("growth", {}).get("growth_signals", []))
+            "UX": data.get("ux", {}).get("score", 0),
+            "Budget": data.get("budget", {}).get("score", 0)
         })
 
     if industry_data:
         industry_df = pd.DataFrame(industry_data)
         avg_by_industry = industry_df.groupby("Industry").mean().reset_index()
-        fig = px.bar(avg_by_industry, x="Industry", y=["Technical", "Business Info", "Functional", "SEO", "Budget"],
+        fig = px.bar(avg_by_industry, x="Industry", y=["Technical", "Business Info", "Functional", "SEO", "UX", "Budget"],
                      title="Average Scores by Industry (User Audits Only)", barmode="group")
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe(avg_by_industry, use_container_width=True)
@@ -527,12 +528,12 @@ def main():
                 "Business Info": data.get("business", {}).get("score", 0),
                 "Functional": data.get("functional", {}).get("score", 0),
                 "SEO": data.get("seo", {}).get("score", 0),
-                "Budget": data.get("budget", {}).get("score", 0),
-                "Dead End": data.get("dead_end", {}).get("score", 0)
+                "UX": data.get("ux", {}).get("score", 0),
+                "Budget": data.get("budget", {}).get("score", 0)
             })
         trend_df = pd.DataFrame(trend_data)
         if not trend_df.empty:
-            fig = px.line(trend_df, x="Date", y=["Technical", "Business Info", "Functional", "SEO", "Budget"],
+            fig = px.line(trend_df, x="Date", y=["Technical", "Business Info", "Functional", "SEO", "UX", "Budget"],
                           title="Score Trends Over Time (User Audits Only)", markers=True)
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(trend_df, use_container_width=True)
