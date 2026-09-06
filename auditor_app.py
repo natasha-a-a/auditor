@@ -540,11 +540,17 @@ def fetch_competitors(industry_keyword):
     return COMPETITOR_LISTS.get(industry_keyword, [])
 
 def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
-    domain = urlparse(url).netloc
-    competitors = []
-    if industry_keyword != "Other":
-        competitors = fetch_competitors(industry_keyword)
+    """Fetch benchmarks from ALL websites in the same industry (including user audits)."""
+    current_domain = urlparse(url).netloc
 
+    # Get ALL websites in the same industry (both benchmarks AND user audits)
+    industry_competitors = [
+        data for domain, data in cache.items()
+        if data.get("industry_keyword") == industry_keyword and domain != current_domain
+    ]
+
+    # Crawl any predefined competitors that haven't been crawled yet
+    competitors = fetch_competitors(industry_keyword)
     uncrawled_competitors = [
         url for url in competitors
         if urlparse(url).netloc not in cache
@@ -579,10 +585,11 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
             else:
                 st.warning(f"Could not crawl competitor: {url}")
 
-    industry_competitors = [
-        data for domain, data in cache.items()
-        if data.get("industry_keyword") == industry_keyword and data.get("is_benchmark", False)
-    ]
+        # Recalculate industry_competitors to include newly crawled ones
+        industry_competitors = [
+            data for domain, data in cache.items()
+            if data.get("industry_keyword") == industry_keyword and domain != current_domain
+        ]
 
     if industry_competitors:
         avg_scores = {
@@ -596,7 +603,7 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
         return avg_scores
     else:
         return INDUSTRY_BENCHMARKS.get(industry_keyword, INDUSTRY_BENCHMARKS["Other"])
-
+    
 # --- Audit Functions ---
 def technical_audit(crawl_result):
     if not crawl_result["html"]:

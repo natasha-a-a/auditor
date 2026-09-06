@@ -61,8 +61,6 @@ def load_recommendations():
             if not df.empty and all(col in df.columns for col in expected_columns):
                 st.info(f"✅ Loaded {len(df)} recommendations from local CSV")
                 return df
-            else:
-                st.warning(f"⚠️ Local CSV has wrong format. Expected: {expected_columns}, Got: {list(df.columns)}")
         except Exception as e:
             st.warning(f"⚠️ Local recommendations CSV error: {str(e)}")
 
@@ -72,8 +70,6 @@ def load_recommendations():
         if not df.empty and all(col in df.columns for col in expected_columns):
             st.info(f"✅ Loaded {len(df)} recommendations from GitHub CSV")
             return df
-        else:
-            st.warning(f"⚠️ GitHub CSV has wrong format. Expected: {expected_columns}, Got: {list(df.columns)}")
     except Exception as e:
         st.warning(f"⚠️ GitHub recommendations CSV error: {str(e)}")
 
@@ -229,10 +225,10 @@ def generate_full_csv(cache, include_benchmarks=False):
                 status = check_data.get("status", "N/A")
                 issue = check_data.get("issue", "No issues")
 
-                # Correct status for specific checks
-                if check_name in ['flash_elements', 'outdated_plugins'] and 'detected' in issue.lower():
+                # FIX: Safe check for None values
+                if check_name in ['flash_elements', 'outdated_plugins'] and issue and 'detected' in str(issue).lower():
                     status = 'Needs improvement'
-                elif check_name == 'ssl_tls' and not data.get('crawl', {}).get('ssl_valid', True):
+                elif check_name == 'ssl_tls' and last_data.get('crawl', {}).get('ssl_valid') is False:
                     status = 'Critical'
 
                 csv_data.append({
@@ -353,7 +349,7 @@ def main():
 
     st.markdown("""
     **Overview:**
-    - **Benchmarks**: Compare scores across industries.
+    - **Benchmarks**: Compare scores across industries (includes ALL user audits in same industry).
     - **Trends**: Track changes over the last 7 days.
     - **Recent Entries**: View the last 10 user-submitted audited websites.
     - **In-Depth Analysis**: Detailed scorecard for the last audited website.
@@ -367,7 +363,7 @@ def main():
 
         # --- In-Depth Scorecard for Last Audited Website ---
         st.subheader(f"🔍 In-Depth Analysis: {last_data.get('url', 'N/A')}")
-        st.markdown(f"**Industry:** {last_data.get('industry_keyword', 'Other')} | **Date:** {last_data.get('audit_date', last_data.get('timestamp', 'N/A'))}")
+        st.markdown(f"**Industry:** {last_data.get('industry_keyword', 'Other')} | **Date:** {last_data.get('audit_date', last_data.get('timestamp', 'N/A'))} | **Language:** {last_data.get('language', 'N/A').upper()}")
 
         # Scorecard with explanations
         st.markdown("### 📊 Detailed Scorecard")
@@ -393,10 +389,10 @@ def main():
                         status = check_data.get('status', 'N/A')
                         issue = check_data.get('issue', 'No issues')
 
-                        # Correct status display for specific checks
-                        if check_name in ['flash_elements', 'outdated_plugins'] and 'detected' in issue.lower():
+                        # FIX: Safe check for None values
+                        if check_name in ['flash_elements', 'outdated_plugins'] and issue and 'detected' in str(issue).lower():
                             display_status = 'Needs improvement'
-                        elif check_name == 'ssl_tls' and not last_data.get('crawl', {}).get('ssl_valid', True):
+                        elif check_name == 'ssl_tls' and last_data.get('crawl', {}).get('ssl_valid') is False:
                             display_status = 'Critical'
                         else:
                             display_status = status
@@ -492,26 +488,28 @@ def main():
         fig.update_layout(title="Score Distribution Across Last 10 Audits")
         st.plotly_chart(fig, use_container_width=True)
 
-    # --- Benchmarks by Industry (User Audits Only) ---
-    st.subheader("📈 Industry Benchmarks (User Audits Only)")
+    # --- Benchmarks by Industry (Includes ALL User Audits) ---
+    st.subheader("📈 Industry Benchmarks (Includes ALL User Audits in Same Industry)")
     industry_data = []
-    for domain, data in user_cache.items():
-        industry = data.get("industry_keyword", "Other")
-        industry_data.append({
-            "Industry": industry,
-            "Technical": data.get("technical", {}).get("score", 0),
-            "Business Info": data.get("business", {}).get("score", 0),
-            "Functional": data.get("functional", {}).get("score", 0),
-            "SEO": data.get("seo", {}).get("score", 0),
-            "UX": data.get("ux", {}).get("score", 0),
-            "Budget": data.get("budget", {}).get("score", 0)
-        })
+    for domain, data in cache.items():
+        if not data.get("is_benchmark", False):  # Only use user audits for benchmark display
+            industry = data.get("industry_keyword", "Other")
+            industry_data.append({
+                "Industry": industry,
+                "Technical": data.get("technical", {}).get("score", 0),
+                "Business Info": data.get("business", {}).get("score", 0),
+                "Functional": data.get("functional", {}).get("score", 0),
+                "SEO": data.get("seo", {}).get("score", 0),
+                "UX": data.get("ux", {}).get("score", 0),
+                "Budget": data.get("budget", {}).get("score", 0),
+                "Growth Signals": len(data.get("growth", {}).get("growth_signals", []))
+            })
 
     if industry_data:
         industry_df = pd.DataFrame(industry_data)
         avg_by_industry = industry_df.groupby("Industry").mean().reset_index()
         fig = px.bar(avg_by_industry, x="Industry", y=["Technical", "Business Info", "Functional", "SEO", "UX", "Budget"],
-                     title="Average Scores by Industry (User Audits Only)", barmode="group")
+                     title="Average Scores by Industry (Includes ALL User Audits)", barmode="group")
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe(avg_by_industry, use_container_width=True)
 
