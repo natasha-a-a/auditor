@@ -543,70 +543,65 @@ def crawl_competitors_parallel(competitor_urls, max_workers=3, progress_bar=None
 def fetch_competitors(industry_keyword):
     return COMPETITOR_LISTS.get(industry_keyword, [])
 
-def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
-    """Fetch competitor benchmarks from ALL websites in the same industry."""
-    current_domain = urlparse(url).netloc
+# --- NEW FUNCTIONS FOR MISSING SCORES ---
+def is_audit_complete(audit_data):
+    """Check if an audit has all required categories with scores."""
+    required_categories = ["technical", "business", "functional", "seo", "ux", "budget"]
+    return all(
+        cat in audit_data and
+        isinstance(audit_data[cat], dict) and
+        "score" in audit_data[cat]
+        for cat in required_categories
+    )
 
-    # Get ALL websites in the same industry (both benchmarks AND user audits)
-    industry_competitors = [
-        data for domain, data in cache.items()
-        if data.get("industry_keyword") == industry_keyword and domain != current_domain
+def complete_missing_audits(cache, whois_cache):
+    """Re-audit any entries with missing categories."""
+    incomplete_domains = [
+        domain for domain, data in cache.items()
+        if not is_audit_complete(data)
     ]
 
-    # Crawl any predefined competitors that haven't been crawled yet
-    competitors = fetch_competitors(industry_keyword)
-    uncrawled_competitors = [
-        url for url in competitors
-        if urlparse(url).netloc not in cache
-    ]
-    if uncrawled_competitors:
-        st.info(f"Crawling {len(uncrawled_competitors)} competitors for {industry_keyword}...")
-        progress_bar = st.progress(0)
-        competitor_results = crawl_competitors_parallel(uncrawled_competitors, progress_bar=progress_bar)
-        for url, crawl_result in competitor_results.items():
-            if crawl_result["html"]:
-                language = detect_language(crawl_result["html"], crawl_result["headers"])
-                tech_audit = technical_audit(crawl_result)
-                business_audit = business_info_audit(crawl_result, url, language)
-                functional_audit = functional_gaps_audit(crawl_result, url, language)
-                seo_audit_result = seo_visibility_audit(crawl_result, url, language)
-                budget_audit = budget_red_flags_audit(crawl_result, url, language)
-                ux_audit_result = ux_audit(crawl_result, url, language)
-                growth_audit_result = growth_signals_audit(crawl_result, url, language)
+    if not incomplete_domains:
+        return cache
 
-                cache[urlparse(url).netloc] = {
-                    "url": url,
-                    "technical": tech_audit,
-                    "business": business_audit,
-                    "functional": functional_audit,
-                    "seo": seo_audit_result,
-                    "ux": ux_audit_result,
-                    "budget": budget_audit,
-                    "growth": growth_audit_result,
-                    "industry_keyword": industry_keyword,
-                    "is_benchmark": True
-                }
-            else:
-                st.warning(f"Could not crawl competitor: {url}")
+    for domain in incomplete_domains:
+        data = cache[domain]
+        url = data.get("url", domain)
+        industry_keyword = data.get("industry_keyword", "Other")
 
-        # Recalculate industry_competitors to include newly crawled ones
-        industry_competitors = [
-            data for domain, data in cache.items()
-            if data.get("industry_keyword") == industry_keyword and domain != current_domain
-        ]
+        crawl_result = crawl_page(url)
+        if not crawl_result["html"]:
+            continue
 
-    if industry_competitors:
-        avg_scores = {
-            "technical": np.mean([c.get("technical", {}).get("score", 0) for c in industry_competitors]),
-            "business": np.mean([c.get("business", {}).get("score", 0) for c in industry_competitors]),
-            "functional": np.mean([c.get("functional", {}).get("score", 0) for c in industry_competitors]),
-            "seo": np.mean([c.get("seo", {}).get("score", 0) for c in industry_competitors]),
-            "ux": np.mean([c.get("ux", {}).get("score", 0) for c in industry_competitors]),
-            "budget": np.mean([c.get("budget", {}).get("score", 0) for c in industry_competitors])
+        language = detect_language(crawl_result["html"], crawl_result["headers"])
+
+        technical_audit_result = technical_audit(crawl_result)
+        business_audit_result = business_info_audit(crawl_result, url, language)
+        functional_audit_result = functional_gaps_audit(crawl_result, url, language)
+        seo_audit_result = seo_visibility_audit(crawl_result, url, language)
+        budget_audit_result = budget_red_flags_audit(crawl_result, url, language)
+        ux_audit_result = ux_audit(crawl_result, url, language)
+        growth_audit_result = growth_signals_audit(crawl_result, url, language)
+
+        benchmarks = get_competitor_benchmarks(url, industry_keyword, cache, whois_cache)
+
+        cache[domain] = {
+            **data,
+            "crawl": crawl_result,
+            "technical": technical_audit_result,
+            "business": business_audit_result,
+            "functional": functional_audit_result,
+            "seo": seo_audit_result,
+            "ux": ux_audit_result,
+            "budget": budget_audit_result,
+            "growth": growth_audit_result,
+            "benchmarks": benchmarks,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        return avg_scores
-    else:
-        return INDUSTRY_BENCHMARKS.get(industry_keyword, INDUSTRY_BENCHMARKS["Other"])
+
+    save_cache(cache)
+    save_whois_cache(whois_cache)
+    return cache
 
 # --- Audit Functions ---
 def technical_audit(crawl_result):
@@ -1052,6 +1047,71 @@ def growth_signals_audit(crawl_result, url, language='en'):
 
     return {"score": 100, "issues": [], "checks": {}, "growth_signals": growth_signals}
 
+def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
+    """Fetch competitor benchmarks from ALL websites in the same industry."""
+    current_domain = urlparse(url).netloc
+
+    # Get ALL websites in the same industry (both benchmarks AND user audits)
+    industry_competitors = [
+        data for domain, data in cache.items()
+        if data.get("industry_keyword") == industry_keyword and domain != current_domain
+    ]
+
+    # Crawl any predefined competitors that haven't been crawled yet
+    competitors = fetch_competitors(industry_keyword)
+    uncrawled_competitors = [
+        url for url in competitors
+        if urlparse(url).netloc not in cache
+    ]
+    if uncrawled_competitors:
+        st.info(f"Crawling {len(uncrawled_competitors)} competitors for {industry_keyword}...")
+        progress_bar = st.progress(0)
+        competitor_results = crawl_competitors_parallel(uncrawled_competitors, progress_bar=progress_bar)
+        for url, crawl_result in competitor_results.items():
+            if crawl_result["html"]:
+                language = detect_language(crawl_result["html"], crawl_result["headers"])
+                tech_audit = technical_audit(crawl_result)
+                business_audit = business_info_audit(crawl_result, url, language)
+                functional_audit = functional_gaps_audit(crawl_result, url, language)
+                seo_audit_result = seo_visibility_audit(crawl_result, url, language)
+                budget_audit = budget_red_flags_audit(crawl_result, url, language)
+                ux_audit_result = ux_audit(crawl_result, url, language)
+                growth_audit_result = growth_signals_audit(crawl_result, url, language)
+
+                cache[urlparse(url).netloc] = {
+                    "url": url,
+                    "technical": tech_audit,
+                    "business": business_audit,
+                    "functional": functional_audit,
+                    "seo": seo_audit_result,
+                    "ux": ux_audit_result,
+                    "budget": budget_audit,
+                    "growth": growth_audit_result,
+                    "industry_keyword": industry_keyword,
+                    "is_benchmark": True
+                }
+            else:
+                st.warning(f"Could not crawl competitor: {url}")
+
+        # Recalculate industry_competitors to include newly crawled ones
+        industry_competitors = [
+            data for domain, data in cache.items()
+            if data.get("industry_keyword") == industry_keyword and domain != current_domain
+        ]
+
+    if industry_competitors:
+        avg_scores = {
+            "technical": np.mean([c.get("technical", {}).get("score", 0) for c in industry_competitors]),
+            "business": np.mean([c.get("business", {}).get("score", 0) for c in industry_competitors]),
+            "functional": np.mean([c.get("functional", {}).get("score", 0) for c in industry_competitors]),
+            "seo": np.mean([c.get("seo", {}).get("score", 0) for c in industry_competitors]),
+            "ux": np.mean([c.get("ux", {}).get("score", 0) for c in industry_competitors]),
+            "budget": np.mean([c.get("budget", {}).get("score", 0) for c in industry_competitors])
+        }
+        return avg_scores
+    else:
+        return INDUSTRY_BENCHMARKS.get(industry_keyword, INDUSTRY_BENCHMARKS["Other"])
+
 def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, status_text, batch_num, total_batches, benchmark_websites):
     """Process a batch of URLs with all requested changes."""
     results = []
@@ -1161,6 +1221,9 @@ def main():
         benchmark_websites = load_benchmark_websites()
         cache = load_cache()
         whois_cache = load_whois_cache()
+
+        # FIX: Complete missing audits before processing
+        cache = complete_missing_audits(cache, whois_cache)
 
         if website_url and csv_file:
             st.error("❌ **Error:** Please provide **either** a URL **or** a CSV file, not both.")
@@ -1349,4 +1412,4 @@ def main():
         st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
 
 if __name__ == "__main__":
-    main()                  
+    main()
