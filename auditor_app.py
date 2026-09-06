@@ -540,7 +540,7 @@ def fetch_competitors(industry_keyword):
     return COMPETITOR_LISTS.get(industry_keyword, [])
 
 def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
-    """Fetch benchmarks from ALL websites in the same industry (including user audits)."""
+    """Fetch competitor benchmarks from ALL websites in the same industry."""
     current_domain = urlparse(url).netloc
 
     # Get ALL websites in the same industry (both benchmarks AND user audits)
@@ -593,12 +593,12 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
 
     if industry_competitors:
         avg_scores = {
-            "technical": np.mean([c["technical"]["score"] for c in industry_competitors]),
-            "business": np.mean([c["business"]["score"] for c in industry_competitors]),
-            "functional": np.mean([c["functional"]["score"] for c in industry_competitors]),
-            "seo": np.mean([c["seo"]["score"] for c in industry_competitors]),
-            "ux": np.mean([c["ux"]["score"] for c in industry_competitors]),
-            "budget": np.mean([c["budget"]["score"] for c in industry_competitors])
+            "technical": np.mean([c.get("technical", {}).get("score", 0) for c in industry_competitors]),
+            "business": np.mean([c.get("business", {}).get("score", 0) for c in industry_competitors]),
+            "functional": np.mean([c.get("functional", {}).get("score", 0) for c in industry_competitors]),
+            "seo": np.mean([c.get("seo", {}).get("score", 0) for c in industry_competitors]),
+            "ux": np.mean([c.get("ux", {}).get("score", 0) for c in industry_competitors]),
+            "budget": np.mean([c.get("budget", {}).get("score", 0) for c in industry_competitors])
         }
         return avg_scores
     else:
