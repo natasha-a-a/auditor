@@ -11,8 +11,13 @@ from bs4 import BeautifulSoup
 import re
 
 # --- Constants ---
-GITHUB_REPO = "natasha-a-a/auditor"
-GITHUB_BRANCH = "main"
+GITHUB_REPO = st.secrets["GITHUB_REPO"]
+GITHUB_BRANCH = st.secrets["GITHUB_BRANCH"]
+
+if not GITHUB_REPO or not GITHUB_BRANCH:
+    st.error("❌ GitHub repository and branch must be configured in secrets.toml")
+    st.stop()
+    
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
 GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
