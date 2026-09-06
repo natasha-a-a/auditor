@@ -340,12 +340,12 @@ def main():
         st.markdown("### 📊 Detailed Scorecard")
 
         categories = [
-            ("technical", "🔧 Technical Performance & Security"),
-            ("business", "🏢 Business Info", "Business Presentation"),
-            ("functional", "🛠️ Functional", "Functional Gaps"),
-            ("seo", "🔍 SEO", "SEO & Visibility"),
-            ("ux", "🎨 UX", "UX & Accessibility"),
-            ("budget", "💰 Budget", "Budget & Resources")
+            ("technical", "🔧", "Technical Performance & Security"),
+            ("business", "🏢", "Company Presentation"),
+            ("functional", "🛠️", "Functional Gaps"),
+            ("seo", "🔍", "SEO & Visibility"),
+            ("ux", "🎨", "UX & Accessibility"),
+            ("budget", "💰", "Budget & Resources")
         ]
 
         for cat_key, icon, section in categories:
