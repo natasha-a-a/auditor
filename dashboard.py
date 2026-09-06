@@ -323,11 +323,11 @@ def main():
 
     st.markdown("""
     **Overview:**
-    - **Benchmarks**: Compare scores across industries (includes ALL user audits in same industry).
-    - **Trends**: Track changes over the last 7 days.
+    - **Benchmarks**: Compare scores across industries (includes user audits in same industry).
+    - **Trends**: Analyze user audit scores over the last 7 days.
     - **Recent Entries**: View the last 10 user-submitted audited websites.
     - **In-Depth Analysis**: Detailed scorecard for the last audited website.
-    - **Download Reports**: Get detailed CSV files for analysis.
+    - **Download Reports**: Detailed CSV files for analysis.
     """)
 
     last_audit_entries = get_last_n_entries(cache, n=1)
@@ -340,7 +340,7 @@ def main():
         st.markdown("### 📊 Detailed Scorecard")
 
         categories = [
-            ("technical", "🔧 Technical", "Performance & Security"),
+            ("technical", "🔧 Technical Performance & Security"),
             ("business", "🏢 Business Info", "Business Presentation"),
             ("functional", "🛠️ Functional", "Functional Gaps"),
             ("seo", "🔍 SEO", "SEO & Visibility"),
@@ -446,7 +446,7 @@ def main():
         fig.update_layout(title="Score Distribution Across Last 10 Audits")
         st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("📈 Industry Benchmarks (Includes ALL User Audits in Same Industry)")
+    st.subheader("📈 Industry Benchmarks (Includes User Audits in Same Industry)")
     industry_data = []
     for domain, data in cache.items():
         if not data.get("is_benchmark", False):
@@ -491,7 +491,7 @@ def main():
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(trend_df, use_container_width=True)
 
-    st.subheader("🎯 Download Websites by Pain Point")
+    st.subheader("Download Websites by Pain Point")
     painpoint_df = generate_painpoint_csv_with_contact(cache)
     if not painpoint_df.empty:
         pain_points = painpoint_df['Pain Point'].unique()
