@@ -159,30 +159,35 @@ def load_benchmark_websites():
 
 # --- Language Support Functions ---
 def detect_language(html, headers):
-    soup = BeautifulSoup(html, 'html.parser')
-    html_tag = soup.find('html')
-    if html_tag and html_tag.has_attr('lang'):
-        lang = html_tag['lang'].lower().split('-')[0]
-        if lang in LANGUAGE_KEYWORDS:
-            return lang
-    content_lang = headers.get('Content-Language', '').lower()
-    if content_lang:
-        lang = content_lang.split(',')[0].split('-')[0]
-        if lang in LANGUAGE_KEYWORDS:
-            return lang
-    text = soup.get_text().lower()
-    language_counts = {}
-    for lang in LANGUAGE_KEYWORDS:
-        count = 0
-        for category in LANGUAGE_KEYWORDS[lang]:
-            for check in LANGUAGE_KEYWORDS[lang][category]:
-                for keyword in LANGUAGE_KEYWORDS[lang][category][check]:
-                    if f' {keyword} ' in f' {text} ':
-                        count += 1
-        if count > 0:
-            language_counts[lang] = count
-    if language_counts:
-        return max(language_counts.items(), key=lambda x: x[1])[0]
+    if not html:
+        return 'en'
+    try:
+        soup = BeautifulSoup(html, 'html.parser')
+        html_tag = soup.find('html')
+        if html_tag and html_tag.has_attr('lang'):
+            lang = html_tag['lang'].lower().split('-')[0]
+            if lang in LANGUAGE_KEYWORDS:
+                return lang
+        content_lang = headers.get('Content-Language', '').lower()
+        if content_lang:
+            lang = content_lang.split(',')[0].split('-')[0]
+            if lang in LANGUAGE_KEYWORDS:
+                return lang
+        text = soup.get_text().lower()
+        language_counts = {}
+        for lang in LANGUAGE_KEYWORDS:
+            count = 0
+            for category in LANGUAGE_KEYWORDS.get(lang, {}):
+                for check in LANGUAGE_KEYWORDS[lang].get(category, {}):
+                    for keyword in LANGUAGE_KEYWORDS[lang][category].get(check, []):
+                        if f' {keyword} ' in f' {text} ':
+                            count += 1
+            if count > 0:
+                language_counts[lang] = count
+        if language_counts:
+            return max(language_counts.items(), key=lambda x: x[1])[0]
+    except Exception:
+        pass
     return 'en'
 
 def load_language_keywords():
@@ -484,10 +489,7 @@ def check_domain_expiration(url, whois_cache):
     for attempt in range(WHOIS_RETRIES):
         try:
             w = whois.whois(domain)
-            if isinstance(w.expiration_date, list):
-                expiration_date = w.expiration_date[0]
-            else:
-                expiration_date = w.expiration_date
+            expiration_date = w.expiration_date[0] if isinstance(w.expiration_date, list) else w.expiration_date
             if expiration_date:
                 days_until_expiry = (expiration_date - datetime.now()).days
                 expiring_soon = days_until_expiry < 30
@@ -499,12 +501,14 @@ def check_domain_expiration(url, whois_cache):
                 }
                 save_whois_cache(whois_cache)
                 return expiring_soon
-            return False
         except Exception:
             if attempt == WHOIS_RETRIES - 1:
-                whois_cache[domain] = {"expiring_soon": False, "error": "WHOIS lookup failed", "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                whois_cache[domain] = {
+                    "expiring_soon": False,
+                    "error": "WHOIS lookup failed",
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
                 save_whois_cache(whois_cache)
-                return False
             time.sleep(1)
     return False
 
@@ -603,7 +607,7 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
         return avg_scores
     else:
         return INDUSTRY_BENCHMARKS.get(industry_keyword, INDUSTRY_BENCHMARKS["Other"])
-    
+
 # --- Audit Functions ---
 def technical_audit(crawl_result):
     if not crawl_result["html"]:
@@ -636,57 +640,6 @@ def technical_audit(crawl_result):
     if not viewport:
         score -= SCORE_DEDUCTIONS["mobile_unfriendly"]
         issues.append("Missing viewport meta tag for mobile responsiveness")
-
-    # Flash elements
-    flash_elements = soup.find_all("object", type=lambda x: x and "flash" in x.lower())
-    flash_elements += soup.find_all("embed", type=lambda x: x and "flash" in x.lower())
-    flash_status = "Good" if not flash_elements else "Needs improvement"
-    checks["flash_elements"] = {"status": flash_status, "issue": "Outdated Flash elements detected" if flash_elements else None}
-    if flash_elements:
-        score -= SCORE_DEDUCTIONS["flash_elements"]
-        issues.append("Outdated Flash elements detected")
-
-    # Outdated plugins
-    outdated_plugins = soup.find_all("applet") + soup.find_all("object", type=lambda x: x and ("java" in x.lower() or "silverlight" in x.lower()))
-    plugin_status = "Good" if not outdated_plugins else "Needs improvement"
-    checks["outdated_plugins"] = {"status": plugin_status, "issue": "Outdated plugins detected" if outdated_plugins else None}
-    if outdated_plugins:
-        score -= SCORE_DEDUCTIONS["outdated_plugins"]
-        issues.append("Outdated plugins detected")
-
-    # Broken links (sample first 10)
-    internal_links = [a.get("href") for a in soup.find_all("a", href=True) if a.get("href") and a.get("href").startswith(("/", "https://", "http://"))][:10]
-    broken_links = []
-    for link in internal_links:
-        try:
-            full_url = f"{crawl_result['url'].rstrip('/')}{link}" if link.startswith("/") else link
-            response = requests.head(full_url, timeout=5, allow_redirects=True)
-            if response.status_code >= 400:
-                broken_links.append(full_url)
-        except Exception:
-            broken_links.append(full_url)
-    broken_status = "Good" if not broken_links else "Needs improvement"
-    checks["broken_links"] = {"status": broken_status, "issue": f"{len(broken_links)} broken links found" if broken_links else None}
-    if broken_links:
-        score -= SCORE_DEDUCTIONS["broken_links"] * min(len(broken_links), 5)
-        issues.append(f"{len(broken_links)} broken links detected")
-
-    # Structured data
-    structured_data = soup.find("script", type="application/ld+json")
-    structured_status = "Good" if structured_data else "Needs improvement"
-    checks["structured_data"] = {"status": structured_status, "issue": None if structured_data else "Missing structured data"}
-    if not structured_data:
-        score -= SCORE_DEDUCTIONS["missing_structured_data"]
-        issues.append("Missing structured data (JSON-LD)")
-
-    # HTTP headers
-    security_headers = ["Strict-Transport-Security", "X-Content-Type-Options", "X-Frame-Options"]
-    missing_headers = [h for h in security_headers if h not in crawl_result["headers"]]
-    header_status = "Good" if not missing_headers else "Needs improvement"
-    checks["security_headers"] = {"status": header_status, "issue": f"Missing security headers: {', '.join(missing_headers)}" if missing_headers else None}
-    if missing_headers:
-        score -= SCORE_DEDUCTIONS["missing_security_headers"]
-        issues.append(f"Missing security headers: {', '.join(missing_headers)}")
 
     # Dead end checks (merged into technical)
     expiring_soon = check_domain_expiration(crawl_result["url"], {})
@@ -1067,45 +1020,37 @@ def growth_signals_audit(crawl_result, url, language='en'):
     growth_keywords = lang_keywords.get('growth', {})
 
     soup = BeautifulSoup(crawl_result["html"], 'html.parser')
-    score = 100
-    issues = []
-    checks = {}
     growth_signals = []
     text = soup.get_text().lower()
 
     # Job postings
     job_keywords_list = growth_keywords.get('job_postings', [])
-    has_jobs = any(keyword in text for keyword in job_keywords_list) if job_keywords_list else True
-    if has_jobs:
+    if any(keyword in text for keyword in job_keywords_list) if job_keywords_list else False:
         growth_signals.append("Job postings detected")
 
     # Press releases/news
     press_keywords_list = growth_keywords.get('press_releases', [])
-    has_press = any(keyword in text for keyword in press_keywords_list) if press_keywords_list else True
-    if has_press:
+    if any(keyword in text for keyword in press_keywords_list) if press_keywords_list else False:
         growth_signals.append("Press releases/news detected")
 
     # Facility expansion
     expansion_keywords_list = growth_keywords.get('facility_expansion', [])
-    has_expansion = any(keyword in text for keyword in expansion_keywords_list) if expansion_keywords_list else True
-    if has_expansion:
+    if any(keyword in text for keyword in expansion_keywords_list) if expansion_keywords_list else False:
         growth_signals.append("Facility expansion detected")
 
     # LinkedIn presence
     linkedin_links = [a.get("href", "") for a in soup.find_all("a") if "linkedin.com" in a.get("href", "").lower()]
     linkedin_icons = [img.get("src", "") for img in soup.find_all("img") if "linkedin" in img.get("src", "").lower() or "linkedin" in img.get("alt", "").lower()]
-    has_linkedin = bool(linkedin_links or linkedin_icons)
-    if has_linkedin:
+    if linkedin_links or linkedin_icons:
         growth_signals.append("LinkedIn presence detected")
 
     # Google My Business
     gmb_links = [a.get("href", "") for a in soup.find_all("a") if "google.com/maps" in a.get("href", "").lower()]
     gmb_iframes = [iframe.get("src", "") for iframe in soup.find_all("iframe") if "google.com/maps" in iframe.get("src", "").lower()]
-    has_gmb = bool(gmb_links or gmb_iframes)
-    if has_gmb:
+    if gmb_links or gmb_iframes:
         growth_signals.append("Google My Business detected")
 
-    return {"score": max(0, score), "issues": issues, "checks": checks, "growth_signals": growth_signals}
+    return {"score": 100, "issues": [], "checks": {}, "growth_signals": growth_signals}
 
 def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, status_text, batch_num, total_batches, benchmark_websites):
     """Process a batch of URLs with all requested changes."""
@@ -1167,6 +1112,7 @@ def main():
         page_icon="pawapeaufavicon.png"
     )
 
+    # --- HEADER ---
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.image("pawapeaufavicon.png", width=64)
@@ -1182,6 +1128,7 @@ def main():
 
     benchmark_websites = load_benchmark_websites()
 
+    # --- MAIN FORM ---
     form_col1, form_col2 = st.columns(2)
 
     with form_col1:
@@ -1206,8 +1153,10 @@ def main():
         )
         run_audit_clicked = st.button("🚀 Run Audit")
 
+    # --- SEPARATOR ---
     st.markdown("---")
 
+    # --- AUDIT LOGIC ---
     if 'run_audit_clicked' in locals() and run_audit_clicked:
         benchmark_websites = load_benchmark_websites()
         cache = load_cache()
@@ -1244,6 +1193,7 @@ def main():
                     st.error(f"❌ Error reading CSV: {str(e)}")
                     st.stop()
 
+            # Process in batches
             total_urls = len(urls)
             total_batches = (total_urls + BATCH_SIZE - 1) // BATCH_SIZE
             progress_bar = st.progress(0)
@@ -1283,54 +1233,59 @@ def main():
                     {"key": "budget", "icon": "💰", "name": "Budget"}
                 ]
 
+                # First row of metrics
                 col1, col2, col3 = st.columns(3)
                 for idx, category in enumerate(categories[:3]):
                     with [col1, col2, col3][idx]:
-                        benchmark = result["benchmarks"].get(category["key"], 70)
-                        delta = float(result[category["key"]]["score"]) - float(benchmark)
+                        benchmark = result.get("benchmarks", {}).get(category["key"], 70)
+                        score = result.get(category["key"], {}).get("score", 0)
+                        delta = float(score) - float(benchmark)
                         st.metric(
                             f"{category['icon']} {category['name']}",
-                            f"{result.get(category['key'], {}).get('score', 0):.1f}/100",                            
+                            f"{score:.1f}/100",
                             delta=f"{delta:+.1f}"
                         )
-                        if result.get(category["key"], {}).get("issues"):                            
+                        if result.get(category["key"], {}).get("issues"):
                             with st.expander(f"⚠️ {category['name']} Issues"):
-                                for issue in result.get(category["key"], {}).get("issues", []):                                    
+                                for issue in result.get(category["key"], {}).get("issues", []):
                                     st.write(f"- {issue}")
 
+                # Second row of metrics
                 col4, col5, col6 = st.columns(3)
                 for idx, category in enumerate(categories[3:]):
                     with [col4, col5, col6][idx]:
-                        benchmark = result["benchmarks"].get(category["key"], 70)
-                        delta = float(result.get(category["key"], {}).get("score", 0)) - float(benchmark)                        
+                        benchmark = result.get("benchmarks", {}).get(category["key"], 70)
+                        score = result.get(category["key"], {}).get("score", 0)
+                        delta = float(score) - float(benchmark)
                         st.metric(
                             f"{category['icon']} {category['name']}",
-                            f"{result.get(category['key'], {}).get('score', 0):.1f}/100",                            
+                            f"{score:.1f}/100",
                             delta=f"{delta:+.1f}"
                         )
-                        if result.get(category["key"], {}).get("issues"):                            
+                        if result.get(category["key"], {}).get("issues"):
                             with st.expander(f"⚠️ {category['name']} Issues"):
-                                for issue in result.get(category["key"], {}).get("issues", []):                                    
+                                for issue in result.get(category["key"], {}).get("issues", []):
                                     st.write(f"- {issue}")
 
+                # Benchmark comparison
                 st.markdown("#### 📈 Benchmark Comparison")
                 benchmark_data = {
                     "Category": ["Technical", "Business Info", "Functional", "SEO", "UX", "Budget"],
                     "Analyzed Website Score": [
-                        result["technical"]["score"],
-                        result["business"]["score"],
-                        result["functional"]["score"],
-                        result["seo"]["score"],
-                        result["ux"]["score"],
-                        result["budget"]["score"]
+                        result.get("technical", {}).get("score", 0),
+                        result.get("business", {}).get("score", 0),
+                        result.get("functional", {}).get("score", 0),
+                        result.get("seo", {}).get("score", 0),
+                        result.get("ux", {}).get("score", 0),
+                        result.get("budget", {}).get("score", 0)
                     ],
                     "Industry Benchmark": [
-                        result["benchmarks"].get("technical", 70),
-                        result["benchmarks"].get("business", 70),
-                        result["benchmarks"].get("functional", 70),
-                        result["benchmarks"].get("seo", 70),
-                        result["benchmarks"].get("ux", 70),
-                        result["benchmarks"].get("budget", 70)
+                        result.get("benchmarks", {}).get("technical", 70),
+                        result.get("benchmarks", {}).get("business", 70),
+                        result.get("benchmarks", {}).get("functional", 70),
+                        result.get("benchmarks", {}).get("seo", 70),
+                        result.get("benchmarks", {}).get("ux", 70),
+                        result.get("benchmarks", {}).get("budget", 70)
                     ]
                 }
                 benchmark_df = pd.DataFrame(benchmark_data)
@@ -1356,7 +1311,8 @@ def main():
 
                 st.markdown("---")
 
-    st.markdown("### Benchmark Website Management")
+    # --- BENCHMARK MANAGEMENT SECTION ---
+    st.markdown("### 🎯 Benchmark Website Management")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -1381,6 +1337,7 @@ def main():
 
     st.markdown("---")
 
+    # --- BOTTOM SECTION ---
     endcol1, end_col2 = st.columns(2)
     with endcol1:
         if st.button("🧹 Clean Up Old Cache Entries"):
@@ -1392,4 +1349,4 @@ def main():
         st.markdown("[📧 Report an Issue](mailto:technical@pawapeau.com?subject=Audit%20Tool%20Issue&body=URL:%20%0AIssue:%20)")
 
 if __name__ == "__main__":
-    main()
+    main()                  
