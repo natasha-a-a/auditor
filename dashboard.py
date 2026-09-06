@@ -19,9 +19,9 @@ if not GITHUB_REPO or not GITHUB_BRANCH:
     st.stop()
 
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
-GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv?t={int(datetime.now().timestamp())}"
-GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv?t={int(datetime.now().timestamp())}"
-GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv?t={int(datetime.now().timestamp())}"
+GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
+GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
+GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv"
 
 # --- Helper Functions ---
 def format_score(score, decimals=3):
@@ -32,7 +32,9 @@ def format_score(score, decimals=3):
     return str(score)
 
 def fetch_csv_from_github(url, sep=None):
-    """Fetch CSV file directly from GitHub raw URL with proper error handling."""
+    """Fetch CSV file directly from GitHub raw URL with proper error handling and cache-busting."""
+    if "githubusercontent.com" in url and "?" not in url:
+        url = f"{url}?t={int(datetime.now().timestamp())}"
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -178,7 +180,7 @@ def filter_recent_entries(cache, days=7):
     return {k: v for k, v in cache.items() if v.get("audit_date", v.get("timestamp", "")) >= cutoff_date}
 
 def get_last_n_entries(cache, n=10):
-    """Get the last N user-submitted entries from the cache."""
+    """Get the last N user-submitted entries from the cache, sorted by date descending."""
     user_cache = filter_user_audits(cache)
     sorted_entries = sorted(
         user_cache.items(),
@@ -191,7 +193,13 @@ def generate_full_csv(cache, include_benchmarks=False):
     """Generate a CSV of all audit data in the cache."""
     user_cache = cache if include_benchmarks else filter_user_audits(cache)
     csv_data = []
-    for domain, data in user_cache.items():
+    # Sort entries by date descending to ensure most recent first
+    sorted_entries = sorted(
+        user_cache.items(),
+        key=lambda x: x[1].get("audit_date", x[1].get("timestamp", "")),
+        reverse=True
+    )
+    for domain, data in sorted_entries:
         url = data.get("url", "N/A")
         audit_date = data.get("audit_date", data.get("timestamp", "N/A"))
         benchmarks = data.get("benchmarks", {})
@@ -263,7 +271,13 @@ def generate_painpoint_csv_with_contact(cache):
     }
 
     painpoint_data = []
-    for domain, data in user_cache.items():
+    # Sort by date descending to ensure most recent first
+    sorted_user_cache = sorted(
+        user_cache.items(),
+        key=lambda x: x[1].get("audit_date", x[1].get("timestamp", "")),
+        reverse=True
+    )
+    for domain, data in sorted_user_cache:
         html = data.get('crawl', {}).get('html', '')
         contact_email, physical_address = extract_contact_info(html, data.get('url', ''))
 
@@ -323,13 +337,16 @@ def main():
     st.markdown("""
     **Overview:**
     - **Benchmarks**: Compare scores across industries (includes user audits in same industry).
-    - **Trends**: Analyze user audit scores over the last 7 days.
+    - **Trends**: Analyze user audit scores over the last 7 days in chronological order.
     - **Recent Entries**: View the last 10 user-submitted audited websites.
-    - **In-Depth Analysis**: Detailed scorecard for the last audited website.
+    - **In-Depth Analysis**: Detailed scorecard for the most recent audited website.
     - **Download Reports**: Detailed CSV files for analysis.
     """)
 
-    last_audit_entries = get_last_n_entries(cache, n=1)
+    # Get all entries sorted by date for consistent ordering
+    all_entries = get_last_n_entries(cache, n=len(user_cache))
+    last_audit_entries = dict(list(all_entries.items())[:1]) if all_entries else {}
+
     if last_audit_entries:
         last_domain, last_data = next(iter(last_audit_entries.items()))
 
@@ -386,7 +403,7 @@ def main():
 
         st.markdown("---")
 
-    st.subheader("📋 Last 10 User-Submitted Audited Websites")
+    st.subheader("📋 Last 10 User-Submitted Audited Websites (Most Recent First)")
     last_10_entries = get_last_n_entries(cache, n=10)
 
     if last_10_entries:
@@ -401,7 +418,7 @@ def main():
                     mime="text/csv"
                 )
 
-        st.markdown("### 📥 Individual In-Depth Reports")
+        st.markdown("### 📥 Individual In-Depth Reports (Most Recent First)")
         for domain, data in last_10_entries.items():
             col1, col2 = st.columns([4, 1])
             with col1:
@@ -467,7 +484,7 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe(avg_by_industry, use_container_width=True)
 
-    st.subheader("📉 Trends (Last 7 Days - User Audits Only)")
+    st.subheader("📉 Trends (Last 7 Days - User Audits Only, Most Recent First)")
     recent_entries = filter_recent_entries(user_cache, days=7)
     if recent_entries:
         trend_data = []
@@ -484,8 +501,10 @@ def main():
             })
         trend_df = pd.DataFrame(trend_data)
         if not trend_df.empty:
+            # Sort by date descending (most recent first)
+            trend_df = trend_df.sort_values("Date", ascending=False)
             fig = px.line(trend_df, x="Date", y=["Technical", "Business Info", "Functional", "SEO", "UX", "Budget"],
-                          title="Score Trends Over Time", markers=True)
+                          title="Score Trends Over Time (Most Recent First)", markers=True)
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(trend_df, use_container_width=True)
 
@@ -493,7 +512,7 @@ def main():
     painpoint_df = generate_painpoint_csv_with_contact(cache)
     if not painpoint_df.empty:
         pain_points = painpoint_df['Pain Point'].unique()
-        cols = st.columns(min(len(pain_points), 3))
+        cols = st.columns(min(len(pain_points), 4))
         for idx, pain_point in enumerate(pain_points):
             with cols[idx % len(cols)]:
                 pain_point_data = painpoint_df[painpoint_df['Pain Point'] == pain_point]
