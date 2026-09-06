@@ -1290,7 +1290,7 @@ def main():
                         delta = float(result[category["key"]]["score"]) - float(benchmark)
                         st.metric(
                             f"{category['icon']} {category['name']}",
-                            f"{result.get(category['key'], {}).get('score', 0):.1f}/100"                            
+                            f"{result.get(category['key'], {}).get('score', 0):.1f}/100",                            
                             delta=f"{delta:+.1f}"
                         )
                         if result[category["key"]]["issues"]:
@@ -1305,7 +1305,7 @@ def main():
                         delta = float(result.get(category["key"], {}).get("score", 0)) - float(benchmark)                        
                         st.metric(
                             f"{category['icon']} {category['name']}",
-                            f"{result.get(category['key'], {}).get('score', 0):.1f}/100"                            
+                            f"{result.get(category['key'], {}).get('score', 0):.1f}/100",                            
                             delta=f"{delta:+.1f}"
                         )
                         if result[category["key"]]["issues"]:
