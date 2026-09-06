@@ -17,7 +17,7 @@ GITHUB_BRANCH = st.secrets["GITHUB_BRANCH"]
 if not GITHUB_REPO or not GITHUB_BRANCH:
     st.error("❌ GitHub repository and branch must be configured in secrets.toml")
     st.stop()
-    
+
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
 GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
@@ -230,10 +230,9 @@ def generate_full_csv(cache, include_benchmarks=False):
                 status = check_data.get("status", "N/A")
                 issue = check_data.get("issue", "No issues")
 
-                # FIX: Safe check for None values
                 if check_name in ['flash_elements', 'outdated_plugins'] and issue and 'detected' in str(issue).lower():
                     status = 'Needs improvement'
-                elif check_name == 'ssl_tls' and last_data.get('crawl', {}).get('ssl_valid') is False:
+                elif check_name == 'ssl_tls' and data.get('crawl', {}).get('ssl_valid') is False:
                     status = 'Critical'
 
                 csv_data.append({
