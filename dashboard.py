@@ -63,7 +63,6 @@ def load_recommendations():
         try:
             df = pd.read_csv(local_path, sep=';')
             if not df.empty and all(col in df.columns for col in expected_columns):
-                st.info(f"✅ Loaded {len(df)} recommendations from local CSV")
                 return df
         except Exception as e:
             st.warning(f"⚠️ Local recommendations CSV error: {str(e)}")
