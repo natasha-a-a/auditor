@@ -1356,7 +1356,7 @@ def main():
 
                 st.markdown("---")
 
-    st.markdown("### 🎯 Benchmark Website Management")
+    st.markdown("### Benchmark Website Management")
 
     col1, col2 = st.columns(2)
     with col1:
