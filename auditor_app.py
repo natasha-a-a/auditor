@@ -1272,7 +1272,7 @@ def main():
                 st.markdown(f"### {result['url']}")
                 if result.get("is_benchmark", False):
                     st.markdown("**🏷️ Benchmark Website**")
-                st.markdown(f"**Industry:** {result['industry_keyword']} | **Date:** {result['audit_date']} | **Language:** {result['language'].upper()}")
+                st.markdown(f"**Industry:** {result['industry_keyword']} | **Date:** {result['audit_date']} | **Language:** {result.get('language', 'N/A').upper()}")
 
                 categories = [
                     {"key": "technical", "icon": "🔧", "name": "Technical"},
