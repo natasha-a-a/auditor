@@ -9,13 +9,17 @@ import io
 import numpy as np
 from bs4 import BeautifulSoup
 import re
+from urllib.parse import urlparse
+
+# Import shared cache module
+from github_cache import get_github_csv, clear_cache as clear_github_cache, set_cache_ttl
 
 # --- Constants ---
 GITHUB_REPO = st.secrets["GITHUB_REPO"]
 GITHUB_BRANCH = st.secrets["GITHUB_BRANCH"]
 
 if not GITHUB_REPO or not GITHUB_BRANCH:
-    st.error("❌ GitHub repository and branch must be configured in secrets.toml")
+    st.error("🚫 GitHub repository and branch must be configured in secrets.toml")
     st.stop()
 
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
@@ -23,8 +27,11 @@ GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
 GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv"
 
+# Set cache TTL for dashboard (5 minutes)
+set_cache_ttl(300)
+
 # --- Helper Functions ---
-def format_score(score, decimals=3):
+def format_score(score, decimals=2):
     """Format score to maximum `decimals` decimal places."""
     if isinstance(score, (int, float)):
         formatted = f"{score:.{decimals}f}"
@@ -32,23 +39,12 @@ def format_score(score, decimals=3):
     return str(score)
 
 def fetch_csv_from_github(url, sep=None):
-    """Fetch CSV file directly from GitHub raw URL with proper error handling and cache-busting."""
-    if "githubusercontent.com" in url and "?" not in url:
-        url = f"{url}?t={int(datetime.now().timestamp())}"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        return pd.read_csv(io.StringIO(response.text), sep=sep)
-    except requests.exceptions.RequestException as e:
-        st.warning(f"⚠️ Could not fetch {url}: {str(e)}")
-        return pd.DataFrame()
-    except Exception as e:
-        st.warning(f"⚠️ CSV parsing error for {url}: {str(e)}")
-        return pd.DataFrame()
+    """Fetch CSV using shared cache module."""
+    return get_github_csv(url, sep=sep)
 
 def load_benchmark_websites():
-    """Load benchmark websites from GitHub CSV."""
-    df = fetch_csv_from_github(GITHUB_BENCHMARK_CSV_URL, sep=',')
+    """Load benchmark websites from GitHub CSV using shared cache."""
+    df = get_github_csv(GITHUB_BENCHMARK_CSV_URL, sep=',')
     if df.empty:
         return set()
     if 'url' not in df.columns:
@@ -57,7 +53,7 @@ def load_benchmark_websites():
     return set(df['url'].tolist())
 
 def load_recommendations():
-    """Load recommendations from CSV with semicolon delimiter and validation."""
+    """Load recommendations from CSV with semicolon delimiter and validation using shared cache."""
     expected_columns = ['industry', 'category', 'check_name', 'business_impact', 'recommendation', 'priority']
     local_path = Path("recommendations.csv")
 
@@ -69,18 +65,15 @@ def load_recommendations():
         except Exception as e:
             st.warning(f"⚠️ Local recommendations CSV error: {str(e)}")
 
-    try:
-        df = fetch_csv_from_github(GITHUB_RECOMMENDATIONS_CSV_URL, sep=';')
-        if not df.empty and all(col in df.columns for col in expected_columns):
-            return df
-    except Exception as e:
-        st.warning(f"⚠️ GitHub recommendations CSV error: {str(e)}")
+    df = get_github_csv(GITHUB_RECOMMENDATIONS_CSV_URL, sep=';')
+    if not df.empty and all(col in df.columns for col in expected_columns):
+        return df
 
     return pd.DataFrame(columns=expected_columns)
 
 def load_github_cache():
-    """Load audit cache from GitHub CSV with error handling."""
-    df = fetch_csv_from_github(GITHUB_AUDIT_CSV_URL, sep=',')
+    """Load audit cache from GitHub CSV with error handling using shared cache."""
+    df = get_github_csv(GITHUB_AUDIT_CSV_URL, sep=',')
     if df.empty:
         st.warning("⚠️ Audit CSV is empty or failed to load")
         return {}
@@ -89,13 +82,22 @@ def load_github_cache():
         return {}
 
     benchmark_websites = load_benchmark_websites()
+    # Normalize benchmark URLs to domains for comparison
+    benchmark_domains = set()
+    for url in benchmark_websites:
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower().replace('www.', '')
+        benchmark_domains.add(domain)
+
     cache = {}
     for _, row in df.iterrows():
         try:
+            # Normalize the domain from the row
+            row_domain = row["domain"].lower().replace('www.', '')
             cache[row["domain"]] = {
                 **json.loads(row["data"]),
                 "timestamp": row["timestamp"],
-                "is_benchmark": row["domain"] in benchmark_websites
+                "is_benchmark": row_domain in benchmark_domains
             }
         except json.JSONDecodeError:
             continue
@@ -119,8 +121,22 @@ def extract_contact_info(html, url):
         if not contact_email and emails:
             contact_email = emails[0]
 
-        address_pattern = r'\d+\s[\w\s]+,\s[\w\s]+,\s[A-Z]{2}\s\d{5}(?:-\d{4})?'
-        address_match = re.search(address_pattern, text)
+        # Flexible address patterns for US and German addresses
+        address_patterns = [
+            # US addresses
+            r'\d+\s[\w\s]+(?:,\s[\w\s]+){1,2},\s[A-Z]{2}\s\d{5}(?:-\d{4})?',
+            r'\d+\s[\w\s]+\s(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Ln|Lane|Dr|Drive|Ct|Court|Pl|Place|Sq|Square)\b[\w\s]*,\s[\w\s]+,\s[A-Z]{2}\s\d{5}(?:-\d{4})?',
+            # PO Box
+            r'P\.?\s*O\.?\s*Box\s+\d+',
+            # German addresses: Street Name 123, 12345 City
+            r'[\w\s]+\s\d{1,4}[a-z]?\s*,\s*\d{5}\s[\w\s]+',
+            # German addresses without comma: Street Name 123 12345 City
+            r'[\w\s]+\s\d{1,4}[a-z]?\s+\d{5}\s[\w\s]+',
+            # Generic fallback
+            r'\d+\s[\w\s]+(?:,\s[\w\s]+){1,3}\s*(?:[A-Z]{2}\s)?\d{3,10}',
+        ]
+        address_pattern = '|'.join(address_patterns)
+        address_match = re.search(address_pattern, text, re.IGNORECASE)
         physical_address = address_match.group(0) if address_match else None
         return contact_email, physical_address
     except Exception:
@@ -176,19 +192,55 @@ def filter_user_audits(cache):
 
 def filter_recent_entries(cache, days=7):
     """Filter cache entries from the last N days."""
-    cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    return {k: v for k, v in cache.items() if v.get("audit_date", v.get("timestamp", "")) >= cutoff_date}
+    user_cache = filter_user_audits(cache)  # Filter benchmarks first
+    cutoff_date = datetime.now() - timedelta(days=days)
+
+    def get_date(data):
+        date_str = data.get("audit_date") or data.get("timestamp", "")
+        if not date_str:
+            return datetime.min
+        if isinstance(date_str, datetime):
+            return date_str
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            try:
+                return datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                return datetime.min
+
+    return {k: v for k, v in user_cache.items()
+            if get_date(v) >= cutoff_date}
 
 def get_last_n_entries(cache, n=10):
     """Get the last N user-submitted entries from the cache, sorted by date descending."""
+    from datetime import datetime
     user_cache = filter_user_audits(cache)
+
+    def get_date(data):
+        # Try audit_date first, then timestamp
+        date_str = data.get("audit_date") or data.get("timestamp", "")
+        if not date_str:
+            return datetime.min
+        # Handle both string and datetime objects
+        if isinstance(date_str, datetime):
+            return date_str
+        try:
+            # Try parsing various date formats
+            return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            try:
+                return datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                # Fall back to string comparison if parsing fails
+                return date_str
+
     sorted_entries = sorted(
         user_cache.items(),
-        key=lambda x: x[1].get("audit_date", x[1].get("timestamp", "")),
+        key=lambda x: get_date(x[1]),
         reverse=True
     )
     return dict(sorted_entries[:n])
-
 def generate_full_csv(cache, include_benchmarks=False):
     """Generate a CSV of all audit data in the cache."""
     user_cache = cache if include_benchmarks else filter_user_audits(cache)
@@ -261,13 +313,14 @@ def generate_full_csv(cache, include_benchmarks=False):
 def generate_painpoint_csv_with_contact(cache):
     """Generate a CSV of websites categorized by primary pain point with contact info."""
     user_cache = filter_user_audits(cache)
+    # Use the same categories as the scorecard
     category_map = {
-        "Technical": "Technical Issues",
-        "Business Info": "Business Info Gaps",
-        "Functional": "Functional Gaps",
-        "SEO": "SEO Weaknesses",
-        "UX": "UX & Accessibility Issues",
-        "Budget": "Budget Constraints"
+        "technical": "Technical Performance & Security",
+        "business": "Company Presentation",
+        "functional": "Functional Gaps",
+        "seo": "SEO & Visibility",
+        "ux": "UX & Accessibility",
+        "budget": "Budget & Resources"
     }
 
     painpoint_data = []
@@ -281,13 +334,14 @@ def generate_painpoint_csv_with_contact(cache):
         html = data.get('crawl', {}).get('html', '')
         contact_email, physical_address = extract_contact_info(html, data.get('url', ''))
 
+        # Use lowercase keys to match the category_map
         scores = {
-            "Technical": data.get("technical", {}).get("score", 0),
-            "Business Info": data.get("business", {}).get("score", 0),
-            "Functional": data.get("functional", {}).get("score", 0),
-            "SEO": data.get("seo", {}).get("score", 0),
-            "UX": data.get("ux", {}).get("score", 0),
-            "Budget": data.get("budget", {}).get("score", 0)
+            "technical": data.get("technical", {}).get("score", 0),
+            "business": data.get("business", {}).get("score", 0),
+            "functional": data.get("functional", {}).get("score", 0),
+            "seo": data.get("seo", {}).get("score", 0),
+            "ux": data.get("ux", {}).get("score", 0),
+            "budget": data.get("budget", {}).get("score", 0)
         }
         worst_category = min(scores, key=scores.get)
         category = category_map[worst_category]
@@ -322,6 +376,7 @@ def main():
     st.title("📊 Paw à Peau Audit Dashboard")
 
     if st.button("🔄 Refresh Data from GitHub"):
+        clear_github_cache()
         st.rerun()
 
     cache = load_github_cache()
@@ -358,9 +413,9 @@ def main():
         categories = [
             ("technical", "🔧", "Technical Performance & Security"),
             ("business", "🏢", "Company Presentation"),
-            ("functional", "🛠️", "Functional Gaps"),
+            ("functional", "🚪", "Functional Gaps"),
             ("seo", "🔍", "SEO & Visibility"),
-            ("ux", "🎨", "UX & Accessibility"),
+            ("ux", "🎭", "UX & Accessibility"),
             ("budget", "💰", "Budget & Resources")
         ]
 
@@ -397,7 +452,7 @@ def main():
                 st.metric(
                     "Benchmark Comparison",
                     f"{format_score(last_data.get(cat_key, {}).get('score', 0))} vs {format_score(benchmark)}",
-                    delta=f"{delta:+.1f}",
+                    delta=f"{delta:+.2f}",
                     delta_color="normal"
                 )
 
@@ -412,7 +467,7 @@ def main():
             if not all_user_df.empty:
                 csv_all = all_user_df.to_csv(index=False)
                 st.download_button(
-                    label="⬇️ Download Complete User Audit Report",
+                    label="📥 Download Complete User Audit Report",
                     data=csv_all,
                     file_name=f"all_user_audits_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                     mime="text/csv"
@@ -427,10 +482,13 @@ def main():
                 individual_df = generate_full_csv({domain: data})
                 if not individual_df.empty:
                     csv_individual = individual_df.to_csv(index=False)
+                    audit_date = data.get('audit_date') or data.get('timestamp', 'N/A')
+                    # Clean the date for filename (remove spaces and colons)
+                    date_str = audit_date.replace(' ', '_').replace(':', '').replace('-', '') if isinstance(audit_date, str) else 'N/A'
                     st.download_button(
                         label="Download",
                         data=csv_individual,
-                        file_name=f"audit_{data.get('url', 'website').replace('https://', '').replace('/', '_')}_{datetime.now().strftime('%Y%m%d')}.csv",
+                        file_name=f"audit_{data.get('url', 'website').replace('https://', '').replace('/', '_')}_{date_str}.csv",
                         mime="text/csv",
                         key=f"download_{domain}"
                     )
@@ -461,7 +519,7 @@ def main():
         fig.update_layout(title="Score Distribution Across Last 10 Audits")
         st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("📈 Industry Benchmarks (Includes User Audits in Same Industry)")
+    st.subheader("🏭 Industry Benchmarks (Includes User Audits in Same Industry)")
     industry_data = []
     for domain, data in cache.items():
         if not data.get("is_benchmark", False):
@@ -512,9 +570,10 @@ def main():
     painpoint_df = generate_painpoint_csv_with_contact(cache)
     if not painpoint_df.empty:
         pain_points = painpoint_df['Pain Point'].unique()
-        cols = st.columns(min(len(pain_points), 4))
+        # Always use 4 columns as requested
+        cols = st.columns(4)
         for idx, pain_point in enumerate(pain_points):
-            with cols[idx % len(cols)]:
+            with cols[idx % 4]:
                 pain_point_data = painpoint_df[painpoint_df['Pain Point'] == pain_point]
                 csv_data = pain_point_data.to_csv(index=False)
                 st.download_button(
