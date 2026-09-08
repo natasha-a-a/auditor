@@ -769,30 +769,297 @@ def functional_gaps_audit(crawl_result, url, language='en'):
 
     return {"score": max(0, score), "issues": issues, "checks": checks}
 
-    # 3. Check for hiring-related widgets (HIRING DETECTION)
+def seo_visibility_audit(crawl_result, url, language='en'):
+    """Check for SEO and visibility issues."""
+    if not crawl_result["html"]:
+        return {"score": 100, "issues": [], "checks": {}}
+
+    # Use cached soup for optimization
+    soup = CachedSoup(crawl_result["html"])
+    score = 100
+    issues = []
+    checks = {}
+
+    # Meta title
+    title = soup.title.string if soup.title else ""
+    title_status = "Good" if title and len(title) <= 60 else "Needs improvement"
+    checks["meta_title"] = {"status": title_status, "issue": "Missing or long meta title" if not title or len(title) > 60 else None}
+    if not title or len(title) > 60:
+        score -= SCORE_DEDUCTIONS["missing_meta_title"]
+        issues.append("Meta title is missing or too long (>60 chars)")
+
+    # Meta description
+    meta_desc = soup.find("meta", attrs={"name": "description"})
+    desc = meta_desc["content"] if meta_desc else ""
+    desc_status = "Good" if desc and 50 <= len(desc) <= 160 else "Needs improvement"
+    checks["meta_description"] = {"status": desc_status, "issue": "Missing or non-optimal meta description" if not desc or len(desc) > 160 or len(desc) < 50 else None}
+    if not desc or len(desc) > 160 or len(desc) < 50:
+        score -= SCORE_DEDUCTIONS["missing_meta_description"]
+        issues.append("Meta description is missing or not optimal (50-160 chars)")
+
+    # Alt text for images
+    images = soup.find_all("img")
+    images_without_alt = [img for img in images if not img.get("alt")]
+    alt_status = "Good" if not images_without_alt else "Needs improvement"
+    checks["alt_text"] = {"status": alt_status, "issue": f"{len(images_without_alt)} images missing alt text" if images_without_alt else None}
+    if images_without_alt:
+        score -= SCORE_DEDUCTIONS["missing_alt_text"] * min(len(images_without_alt), 5)
+        issues.append(f"{len(images_without_alt)} images are missing alt text")
+
+    # URL structure
+    parsed = urlparse(crawl_result["url"])
+    path_parts = [p for p in parsed.path.split('/') if p]
+    url_status = "Good" if len(path_parts) <= MAX_URL_DEPTH else "Needs improvement"
+    checks["url_structure"] = {"status": url_status, "issue": "URL path is too deep" if len(path_parts) > MAX_URL_DEPTH else None}
+    if len(path_parts) > MAX_URL_DEPTH:
+        score -= SCORE_DEDUCTIONS["deep_url_structure"]
+        issues.append(f"URL path is too deep (>{MAX_URL_DEPTH} levels)")
+
+    # Internal links
+    internal_links = [a.get("href") for a in soup.find_all("a", href=True) if a.get("href") and a.get("href").startswith(("/", "https://", "http://"))]
+    link_status = "Good" if len(internal_links) >= MIN_INTERNAL_LINKS else "Needs improvement"
+    checks["internal_links"] = {"status": link_status, "issue": f"Only {len(internal_links)} internal links found" if len(internal_links) < MIN_INTERNAL_LINKS else None}
+    if len(internal_links) < MIN_INTERNAL_LINKS:
+        score -= SCORE_DEDUCTIONS["few_internal_links"]
+        issues.append(f"Few internal links found ({len(internal_links)})")
+
+    # Local SEO
+    gmb_script = soup.find("script", src=lambda x: x and "google.com/maps" in x)
+    gmb_link = soup.find("a", href=lambda x: x and "google.com/maps" in x)
+    has_gmb = bool(gmb_script or gmb_link)
+    gmb_status = "Good" if has_gmb else "Needs improvement"
+    checks["local_seo"] = {"status": gmb_status, "issue": "No Google My Business integration detected" if not has_gmb else None}
+    if not has_gmb:
+        score -= SCORE_DEDUCTIONS["no_local_seo"]
+        issues.append("No Google My Business integration detected")
+
+    # Analytics
+    ga_script = soup.find("script", string=re.compile("UA-\d+|G-\w+|gtag\('config'"))
+    has_analytics = bool(ga_script)
+    analytics_status = "Good" if has_analytics else "Needs improvement"
+    checks["analytics"] = {"status": analytics_status, "issue": "No analytics tools detected" if not has_analytics else None}
+    if not has_analytics:
+        score -= SCORE_DEDUCTIONS["no_analytics"]
+        issues.append("No analytics tools detected")
+
+    return {"score": max(0, score), "issues": issues, "checks": checks}
+
+
+def budget_red_flags_audit(crawl_result, url, language='en'):
+    """Check for budget red flags."""
+    if not crawl_result["html"]:
+        return {"score": 100, "issues": [], "checks": {}}
+
+    lang_keywords = LANGUAGE_KEYWORDS.get(language, {})
+    budget_keywords = lang_keywords.get('budget', {})
+
+    # Use cached soup for optimization
+    soup = CachedSoup(crawl_result["html"])
+    score = 100
+    issues = []
+    checks = {}
+    text = soup.text_lower
+
+    # Physical address
+    address_pattern = re.compile(r'\d+\s[\w\s]+,\s[\w\s]+,\s[A-Z]{2}\s\d{5}')
+    has_address = bool(address_pattern.search(text))
+    address_status = "Good" if has_address else "Needs improvement"
+    checks["physical_address"] = {"status": address_status, "issue": "No physical address detected" if not has_address else None}
+    if not has_address:
+        score -= SCORE_DEDUCTIONS["no_physical_address"]
+        issues.append("No physical address detected")
+
+    # Employee photos/About Us
+    about_page = soup.find("a", href=lambda x: x and re.search(r"/(about|team|employees?)/", x, re.I))
+    has_about = bool(about_page)
+    about_status = "Good" if has_about else "Needs improvement"
+    checks["about_us"] = {"status": about_status, "issue": "No About Us or team page detected" if not has_about else None}
+    if not has_about:
+        score -= SCORE_DEDUCTIONS["no_employee_photos"]
+        issues.append("No About Us or team page detected")
+
+    # Online payments
+    payment_keywords_list = budget_keywords.get('online_payments', [])
+    has_payments = any(keyword in text for keyword in payment_keywords_list) if payment_keywords_list else True
+    payment_status = "Good" if has_payments else "Needs improvement"
+    checks["online_payments"] = {"status": payment_status, "issue": "No online payment options detected" if not has_payments else None}
+    if not has_payments:
+        score -= SCORE_DEDUCTIONS["no_online_payments"]
+        issues.append("No online payment options detected")
+
+    # Generic email addresses
+    email_pattern = re.compile(r'[\w\.-]+@(gmail|yahoo|hotmail|outlook|aol)\.com')
+    has_generic_email = bool(email_pattern.search(text))
+    email_status = "Good" if not has_generic_email else "Needs improvement"
+    checks["generic_email"] = {"status": email_status, "issue": "Generic email address detected" if has_generic_email else None}
+    if has_generic_email:
+        score -= SCORE_DEDUCTIONS["generic_email"]
+        issues.append("Generic email address detected")
+
+    # No updates
+    recent_dates = re.findall(r'\b(202[3-9]|20[3-9][0-9]-\d{2})\b', text)
+    has_recent_updates = bool(recent_dates)
+    update_status = "Good" if has_recent_updates else "Needs improvement"
+    checks["recent_updates"] = {"status": update_status, "issue": "No recent updates detected" if not has_recent_updates else None}
+    if not has_recent_updates:
+        score -= SCORE_DEDUCTIONS["no_updates"]
+        issues.append("No recent updates detected")
+
+    # DIY website
+    diy_keywords_list = budget_keywords.get('diy_website', [])
+    is_diy = any(indicator in text for indicator in diy_keywords_list) if diy_keywords_list else False
+    diy_status = "Good" if not is_diy else "Needs improvement"
+    checks["diy_website"] = {"status": diy_status, "issue": "DIY website with placeholder content detected" if is_diy else None}
+    if is_diy:
+        score -= SCORE_DEDUCTIONS["diy_website"]
+        issues.append("DIY website with placeholder content detected")
+
+    return {"score": max(0, score), "issues": issues, "checks": checks}
+
+
+def ux_audit(crawl_result, url, language='en'):
+    """Check for UX and accessibility issues."""
+    if not crawl_result["html"]:
+        return {"score": 100, "issues": [], "checks": {}}
+
+    lang_keywords = LANGUAGE_KEYWORDS.get(language, {})
+    ux_keywords = lang_keywords.get('ux', {})
+
+    # Use cached soup for optimization
+    soup = CachedSoup(crawl_result["html"])
+    score = 100
+    issues = []
+    checks = {}
+
+    # 1. Mobile Viewport
+    has_viewport = soup.has_viewport()
+    viewport_status = "Good" if has_viewport else "Needs improvement"
+    checks["mobile_viewport"] = {"status": viewport_status, "issue": None if has_viewport else "Missing viewport meta tag"}
+    if not has_viewport:
+        score -= 15
+        issues.append("Missing viewport meta tag for mobile responsiveness")
+
+    # 2. Base Font Size
+    body = soup.find("body")
+    body_font_ok = False
+    if body:
+        if body.has_attr("style") and ("font-size" in body["style"].lower()):
+            body_font_ok = True
+        for style in soup.find_all("style"):
+            if "body" in style.text.lower() and "font-size" in style.text.lower():
+                if any(size in style.text.lower() for size in ["16px", "1rem", "100%", "1.0em"]):
+                    body_font_ok = True
+    font_status = "Good" if body_font_ok else "Needs improvement"
+    checks["readable_font_size"] = {"status": font_status, "issue": None if body_font_ok else "Base font size is too small"}
+    if not body_font_ok:
+        score -= 10
+        issues.append("Base font size is too small for readability")
+
+    # 3. Clear Call-to-Action Buttons
+    buttons = soup.find_all(["button", "a"])
+    cta_keywords_list = ux_keywords.get('clear_ctas', [])
+    has_clear_ctas = any(any(kw in btn.get_text().lower() for kw in cta_keywords_list) for btn in buttons) if cta_keywords_list else True
+    cta_status = "Good" if has_clear_ctas else "Needs improvement"
+    checks["clear_ctas"] = {"status": cta_status, "issue": None if has_clear_ctas else "No clear call-to-action buttons found"}
+    if not has_clear_ctas:
+        score -= 10
+        issues.append("No clear call-to-action buttons found")
+
+    # 4. Form Accessibility
+    forms = soup.find_all("form")
+    accessible_forms = True
+    for form in forms:
+        inputs = form.find_all("input", type=lambda x: x and x.lower() in ["text", "email", "password", "tel", "search"])
+        for inp in inputs:
+            if not inp.get("id") and not inp.get("name") and not inp.find_previous("label"):
+                accessible_forms = False
+                break
+    form_status = "Good" if accessible_forms else "Needs improvement"
+    checks["form_accessibility"] = {"status": form_status, "issue": None if accessible_forms else "Forms lack proper labels"}
+    if not accessible_forms:
+        score -= 10
+        issues.append("Forms lack proper labels for accessibility")
+
+    # 5. Navigation Structure
+    nav = soup.find("nav")
+    menu_links = soup.find_all("a", href=lambda x: x and x.startswith(("/", "#")))
+    has_navigation = bool(nav or len(menu_links) > 5)
+    nav_status = "Good" if has_navigation else "Needs improvement"
+    checks["navigation_structure"] = {"status": nav_status, "issue": None if has_navigation else "No clear navigation menu found"}
+    if not has_navigation:
+        score -= 10
+        issues.append("No clear navigation menu found")
+
+    # 6. Logical Content Structure
+    headings = soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"])
+    has_h1 = any(h.name == "h1" for h in headings)
+    heading_status = "Good" if has_h1 and len(headings) >= 3 else "Needs improvement"
+    checks["content_structure"] = {"status": heading_status, "issue": None if (has_h1 and len(headings) >= 3) else "Missing H1 heading or poor hierarchy"}
+    if not has_h1 or len(headings) < 3:
+        score -= 10
+        issues.append("Missing H1 heading or poor heading hierarchy")
+
+    # 7. Image Accessibility
+    images = soup.find_all("img")
+    images_with_alt = [img for img in images if img.get("alt")]
+    alt_status = "Good" if not images or len(images_with_alt) == len(images) else "Needs improvement"
+    checks["image_accessibility"] = {"status": alt_status, "issue": f"{len(images) - len(images_with_alt)} images missing alt text" if images and len(images_with_alt) < len(images) else None}
+    if images and len(images_with_alt) < len(images):
+        score -= 5 * min(len(images) - len(images_with_alt), 5)
+        issues.append(f"{len(images) - len(images_with_alt)} images missing alt text")
+
+    return {"score": max(0, score), "issues": issues, "checks": checks}
+
+
+def growth_signals_audit(crawl_result, url, language='en'):
+    """Check for growth signals - results saved for later use."""
+    if not crawl_result["html"]:
+        return {"score": 100, "issues": [], "checks": {}, "growth_signals": []}
+
+    lang_keywords = LANGUAGE_KEYWORDS.get(language, {})
+    growth_keywords = lang_keywords.get('growth', {})
+
+    # Use cached soup for optimization
+    soup = CachedSoup(crawl_result["html"])
+    growth_signals = []
+    text = soup.text_lower
+
+    # 1. Job postings
+    job_keywords_list = growth_keywords.get('job_postings', [])
+    if any(keyword in text for keyword in job_keywords_list) if job_keywords_list else False:
+        growth_signals.append("Job postings detected")
+
+    # 2. Hiring detection
+    is_hiring = False
+    # Check for hiring-related widgets
     linkedin_job_widgets = [
         script for script in soup.scripts
         if 'linkedin' in (script.get('src', '') or '').lower() and
            any(kw in (script.get('src', '') or '').lower() for kw in ['jobs', 'career', 'hiring'])
     ]
-    
     if linkedin_job_widgets:
         growth_signals.append("LinkedIn job widget detected")
         is_hiring = True
 
-    # 4. Press releases/news detection
+    # 3. Press releases/news
     press_keywords_list = growth_keywords.get('press_releases', [])
     if any(keyword in text for keyword in press_keywords_list) if press_keywords_list else False:
         growth_signals.append("Press releases/news detected")
 
-    # 5. Facility expansion detection
+    # 4. Facility expansion
     expansion_keywords_list = growth_keywords.get('facility_expansion', [])
     if any(keyword in text for keyword in expansion_keywords_list) if expansion_keywords_list else False:
         growth_signals.append("Facility expansion detected")
 
-    # 6. Google My Business detection
-    gmb_links = [a.get("href", "") for a in soup.links if "google.com/maps" in a.get("href", "").lower()]
-    gmb_iframes = [iframe.get("src", "") for iframe in soup.soup.find_all("iframe") if "google.com/maps" in iframe.get("src", "").lower()]
+    # 5. LinkedIn presence
+    linkedin_links = [a.get("href", "") for a in soup.find_all("a") if "linkedin.com" in a.get("href", "").lower()]
+    linkedin_icons = [img.get("src", "") for img in soup.find_all("img") if "linkedin" in img.get("src", "").lower() or "linkedin" in img.get("alt", "").lower()]
+    if linkedin_links or linkedin_icons:
+        growth_signals.append("LinkedIn presence detected")
+
+    # 6. Google My Business
+    gmb_links = [a.get("href", "") for a in soup.find_all("a") if "google.com/maps" in a.get("href", "").lower()]
+    gmb_iframes = [iframe.get("src", "") for iframe in soup.find_all("iframe") if "google.com/maps" in iframe.get("src", "").lower()]
     if gmb_links or gmb_iframes:
         growth_signals.append("Google My Business detected")
 
@@ -910,7 +1177,26 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
         growth_audit_result = growth_signals_audit(crawl_result, url, language)
 
         benchmarks = get_competitor_benchmarks(url, industry_keyword, cache, whois_cache)
-        benchmark_websites = load_benchmark_websites()
+        result = {
+            "url": url,
+            "audit_date": datetime.now().strftime("%Y-%m-%d"),
+            "language": language,
+            "industry_keyword": industry_keyword,
+            "is_benchmark": url in benchmark_websites,
+            "crawl": crawl_result,
+            "technical": technical_audit_result,
+            "business": business_audit_result,
+            "functional": functional_audit_result,
+            "seo": seo_audit_result,
+            "ux": ux_audit_result,
+            "budget": budget_audit_result,
+            "growth": growth_audit_result,
+            "benchmarks": benchmarks
+        }
+        results.append(result)
+        cache[domain_key] = result
+
+    return results
 
     # --- MAIN FORM ---
     form_col1, form_col2 = st.columns(2)
