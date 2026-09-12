@@ -1200,6 +1200,26 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
 
 # --- MAIN FORM ---
 def main():
+    st.set_page_config(
+        page_title="Paw a Peau Website Audit",
+        layout="wide",
+        page_icon="pawapeaufavicon.png"
+    )
+
+    # --- HEADER ---
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.image("pawapeaufavicon.png", width=64)
+        st.title("Website Audit Tool")
+        st.markdown("""
+        1. Enter **one** of the following:
+           - A **single website URL** (left)
+           - **OR** a **CSV file** for bulk audits (right)
+        2. Select an **industry** from the dropdown.
+        3. Click **Run Audit**.
+        The tool will analyze the site(s) and display a **scorecard**.
+        """)
+
     benchmark_websites = load_benchmark_websites()
     form_col1, form_col2 = st.columns(2)
 
