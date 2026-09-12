@@ -3,7 +3,6 @@ import csv
 import json
 import time
 import base64
-import logging
 import requests
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -23,7 +22,7 @@ import numpy as np
 MAX_WORKERS = min(32, (os.cpu_count() or 1) + 4)
 
 # Import shared cache module
-from github_cache import get_github_csv, clear_cache as clear_github_cache, set_cache_ttl
+from github_cache import get_github_csv
 
 # --- Constants ---
 GITHUB_REPO = st.secrets["GITHUB_REPO"]
@@ -34,8 +33,6 @@ if not GITHUB_REPO or not GITHUB_BRANCH:
     st.stop()
 
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
-GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
-GITHUB_WHOIS_CSV_URL = f"{GITHUB_RAW_BASE}/whois_cache/whois.csv"
 GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
 GITHUB_INDUSTRY_BENCHMARKS_CSV_URL = f"{GITHUB_RAW_BASE}/industry_benchmarks.csv"
 GITHUB_COMPETITORS_CSV_URL = f"{GITHUB_RAW_BASE}/competitors.csv"
@@ -249,25 +246,21 @@ thresholds = load_config_from_csv(
     GITHUB_THRESHOLDS_CSV_URL, LOCAL_THRESHOLDS_CSV,
     {
         "LOAD_TIME_THRESHOLD": 3.0,
-        "MIN_CONTENT_WORDS": 300,
         "MAX_URL_DEPTH": 3,
         "MIN_INTERNAL_LINKS": 5,
-        "MAX_PARAGRAPH_LENGTH": 150,
         "COPYRIGHT_YEAR_THRESHOLD": 2,
-        "CACHE_CLEANUP_DAYS": 180,
-        "BATCH_SIZE": 10,
+        "CACHE_CLEANUP_DAYS": 365,
+        "BATCH_SIZE": 50,
         "WHOIS_RETRIES": 2
     }
 )
 
 LOAD_TIME_THRESHOLD = float(thresholds.get("LOAD_TIME_THRESHOLD", 3.0))
-MIN_CONTENT_WORDS = int(thresholds.get("MIN_CONTENT_WORDS", 300))
 MAX_URL_DEPTH = int(thresholds.get("MAX_URL_DEPTH", 3))
 MIN_INTERNAL_LINKS = int(thresholds.get("MIN_INTERNAL_LINKS", 5))
-MAX_PARAGRAPH_LENGTH = int(thresholds.get("MAX_PARAGRAPH_LENGTH", 150))
 COPYRIGHT_YEAR_THRESHOLD = int(thresholds.get("COPYRIGHT_YEAR_THRESHOLD", 2))
-CACHE_CLEANUP_DAYS = int(thresholds.get("CACHE_CLEANUP_DAYS", 180))
-BATCH_SIZE = int(thresholds.get("BATCH_SIZE", 10))
+CACHE_CLEANUP_DAYS = int(thresholds.get("CACHE_CLEANUP_DAYS", 365))
+BATCH_SIZE = int(thresholds.get("BATCH_SIZE", 50))
 WHOIS_RETRIES = int(thresholds.get("WHOIS_RETRIES", 2))
 
 # --- GitHub Auto-Commit Functions ---

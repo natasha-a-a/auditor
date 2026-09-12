@@ -1,15 +1,17 @@
 import streamlit as st
 import pandas as pd
 import json
-import requests
+import csv
 from pathlib import Path
 from datetime import datetime, timedelta
 import plotly.express as px
-import io
 import numpy as np
 from bs4 import BeautifulSoup
 import re
 from urllib.parse import urlparse
+
+# Audit CSV stores full HTML in the data column; raise the field limit to match auditor_app.py
+csv.field_size_limit(100000000)
 
 # Import shared cache module
 from github_cache import get_github_csv, clear_cache as clear_github_cache, set_cache_ttl
@@ -27,8 +29,8 @@ GITHUB_AUDIT_CSV_URL = f"{GITHUB_RAW_BASE}/audit_cache/audits.csv"
 GITHUB_BENCHMARK_CSV_URL = f"{GITHUB_RAW_BASE}/benchmark_websites.csv"
 GITHUB_RECOMMENDATIONS_CSV_URL = f"{GITHUB_RAW_BASE}/recommendations.csv"
 
-# Set cache TTL for dashboard (5 minutes)
-set_cache_ttl(300)
+# Set cache TTL for dashboard (1 hour; manual refresh button bypasses cache)
+set_cache_ttl(3600)
 
 # --- Helper Functions ---
 def format_score(score, decimals=2):
@@ -37,10 +39,6 @@ def format_score(score, decimals=2):
         formatted = f"{score:.{decimals}f}"
         return formatted.rstrip('0').rstrip('.') if '.' in formatted else formatted
     return str(score)
-
-def fetch_csv_from_github(url, sep=None):
-    """Fetch CSV using shared cache module."""
-    return get_github_csv(url, sep=sep)
 
 def load_benchmark_websites():
     """Load benchmark websites from GitHub CSV using shared cache."""
@@ -214,7 +212,6 @@ def filter_recent_entries(cache, days=7):
 
 def get_last_n_entries(cache, n=10):
     """Get the last N user-submitted entries from the cache, sorted by date descending."""
-    from datetime import datetime
     user_cache = filter_user_audits(cache)
 
     def get_date(data):
@@ -402,7 +399,7 @@ def main():
     last_audit_entries = dict(list(all_entries.items())[:1]) if all_entries else {}
 
     if last_audit_entries:
-        last_domain, last_data = next(iter(last_audit_entries.items()))
+        last_data = next(iter(last_audit_entries.values()))
 
         st.subheader(f"🔍 In-Depth Analysis: {last_data.get('url', 'N/A')}")
         st.markdown(f"**Industry:** {last_data.get('industry_keyword', 'Other')} | **Date:** {last_data.get('audit_date', last_data.get('timestamp', 'N/A'))} | **Language:** {last_data.get('language', 'N/A').upper()}")

@@ -4,14 +4,12 @@ Provides a shared cache for CSV files to reduce redundant network requests.
 """
 
 import io
-import time
 import requests
 import pandas as pd
-from functools import lru_cache
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# Default cache TTL in seconds (1 hour)
-_DEFAULT_CACHE_TTL = 3600
+# Default cache TTL in seconds (2 hours)
+_DEFAULT_CACHE_TTL = 7200
 _cache_ttl = _DEFAULT_CACHE_TTL
 
 # Cache storage
@@ -60,7 +58,7 @@ def get_github_csv(csv_url, force_refresh=False, sep=None):
 
     # Fetch from GitHub
     try:
-        response = requests.get(csv_url, timeout=10)
+        response = requests.get(csv_url, timeout=30)
         if response.status_code == 200:
             df = pd.read_csv(io.StringIO(response.text), sep=sep)
             # Cache the result
