@@ -834,7 +834,7 @@ def seo_visibility_audit(crawl_result, url, language='en'):
         issues.append("No Google My Business integration detected")
 
     # Analytics
-    ga_script = soup.find("script", string=re.compile("UA-\d+|G-\w+|gtag\('config'"))
+    ga_script = soup.find("script", string=re.compile(r"UA-\d+|G-\w+|gtag\('config'"))
     has_analytics = bool(ga_script)
     analytics_status = "Good" if has_analytics else "Needs improvement"
     checks["analytics"] = {"status": analytics_status, "issue": "No analytics tools detected" if not has_analytics else None}
@@ -1198,7 +1198,9 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
 
     return results
 
-    # --- MAIN FORM ---
+# --- MAIN FORM ---
+def main():
+    benchmark_websites = load_benchmark_websites()
     form_col1, form_col2 = st.columns(2)
 
     with form_col1:
@@ -1228,7 +1230,6 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
 
     # --- AUDIT LOGIC ---
     if 'run_audit_clicked' in locals() and run_audit_clicked:
-        benchmark_websites = load_benchmark_websites()
         cache = load_cache()
         whois_cache = load_whois_cache()
 
