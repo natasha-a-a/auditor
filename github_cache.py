@@ -37,31 +37,32 @@ def _is_cache_expired(timestamp):
     return (datetime.now() - timestamp).total_seconds() > _cache_ttl
 
 
-def get_github_csv(csv_url, force_refresh=False):
+def get_github_csv(csv_url, force_refresh=False, sep=None):
     """
     Fetch a CSV file from GitHub with caching.
-    
+
     Args:
         csv_url: URL of the CSV file on GitHub
         force_refresh: If True, bypass cache and fetch fresh data
-    
+        sep: Delimiter passed to pandas.read_csv (None = infer)
+
     Returns:
         pandas.DataFrame containing the CSV data, or empty DataFrame if fetch fails
     """
     if not csv_url:
         return pd.DataFrame()
-    
+
     # Check cache
     if not force_refresh and csv_url in _csv_cache:
         entry = _csv_cache[csv_url]
         if not _is_cache_expired(entry['timestamp']):
             return entry['data']
-    
+
     # Fetch from GitHub
     try:
         response = requests.get(csv_url, timeout=10)
         if response.status_code == 200:
-            df = pd.read_csv(io.StringIO(response.text))
+            df = pd.read_csv(io.StringIO(response.text), sep=sep)
             # Cache the result
             _csv_cache[csv_url] = {
                 'data': df,
@@ -70,5 +71,5 @@ def get_github_csv(csv_url, force_refresh=False):
             return df
     except Exception:
         pass
-    
+
     return pd.DataFrame()
