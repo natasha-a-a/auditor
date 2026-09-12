@@ -1252,8 +1252,6 @@ def main():
     if 'run_audit_clicked' in locals() and run_audit_clicked:
         cache = load_cache()
         whois_cache = load_whois_cache()
-
-        # FIX: Complete missing audits before processing
         cache = complete_missing_audits(cache, whois_cache)
 
         if website_url and csv_file:

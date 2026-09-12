@@ -232,8 +232,7 @@ def get_last_n_entries(cache, n=10):
             try:
                 return datetime.strptime(date_str, "%Y-%m-%d")
             except ValueError:
-                # Fall back to string comparison if parsing fails
-                return date_str
+                return datetime.min
 
     sorted_entries = sorted(
         user_cache.items(),
