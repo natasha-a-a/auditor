@@ -218,7 +218,7 @@ SCORE_DEDUCTIONS = load_config_from_csv(
     GITHUB_SCORE_DEDUCTIONS_CSV_URL, LOCAL_SCORE_DEDUCTIONS_CSV,
     {
         "ssl_invalid": 30, "slow_load_time": 10, "mobile_unfriendly": 10,
-        "flash_elements": 15, "outdated_plugins": 10,
+        "flash_elements": 15, "broken_links": 5, "outdated_plugins": 10,
         "missing_structured_data": 5, "missing_security_headers": 10,
         "no_products": 20, "no_company_info": 15, "no_certifications": 15,
         "no_testimonials": 10, "outdated_copyright": 5,
@@ -462,6 +462,47 @@ def crawl_page(url, max_retries=2):
             continue
     return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
 
+def find_broken_links(crawl_result, max_links=10, timeout=5):
+    """Check up to max_links internal links on the crawled page; return broken link URLs."""
+    from urllib.parse import urljoin
+    base_url = crawl_result["url"]
+    domain = urlparse(base_url).netloc
+    try:
+        soup = BeautifulSoup(crawl_result["html"], "html.parser")
+    except Exception:
+        return []
+
+    candidates = []
+    seen = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        absolute = urljoin(base_url, href)
+        parsed = urlparse(absolute)
+        if parsed.scheme not in ("http", "https") or parsed.netloc != domain:
+            continue
+        if parsed.path.rstrip("/") in seen or (not parsed.path and parsed.netloc == domain):
+            continue
+        seen.add(parsed.path.rstrip("/"))
+        candidates.append(absolute)
+        if len(candidates) >= max_links:
+            break
+
+    broken = []
+    session = requests.Session()
+    for link in candidates:
+        try:
+            response = session.head(link, timeout=timeout, allow_redirects=True)
+            if response.status_code >= 400:
+                confirm = session.get(link, timeout=timeout, allow_redirects=True, stream=True)
+                if confirm.status_code >= 400:
+                    broken.append(link)
+                confirm.close()
+        except Exception:
+            broken.append(link)
+    return broken
+
 def check_domain_expiration(url, whois_cache):
     domain = urlparse(url).netloc
     if domain in whois_cache:
@@ -686,6 +727,18 @@ def technical_audit(crawl_result, whois_cache=None):
     if missing_security_headers:
         score -= SCORE_DEDUCTIONS["missing_security_headers"]
         issues.append(f"Missing security headers: {', '.join(missing_security_headers)}")
+
+    # Broken links (capped sample of internal links)
+    broken_links = find_broken_links(crawl_result)
+    broken_status = "Good" if not broken_links else "Needs improvement"
+    checks["broken_links"] = {
+        "status": broken_status,
+        "issue": None if not broken_links else f"{len(broken_links)} broken internal links detected",
+        "details": {"count": len(broken_links), "broken": broken_links}
+    }
+    if broken_links:
+        score -= SCORE_DEDUCTIONS["broken_links"] * min(len(broken_links), 5)
+        issues.append(f"{len(broken_links)} broken internal link(s) detected (sampled up to 10)")
 
     return {"score": max(0, score), "issues": issues, "checks": checks}
 
