@@ -228,6 +228,8 @@ SCORE_DEDUCTIONS = load_config_from_csv(
         "deep_url_structure": 5, "few_internal_links": 5,
         "no_physical_address": 10, "no_employee_photos": 5, "no_online_payments": 10,
         "generic_email": 5, "diy_website": 10, "no_updates": 10,
+        "small_font_size": 10, "no_clear_ctas": 10, "form_accessibility": 10,
+        "no_navigation": 10, "poor_heading_structure": 10,
         "domain_expiring": 25, "parked_domain": 30
     }
 )
@@ -338,7 +340,7 @@ def save_to_csv(file_path, data):
                 "timestamp": value.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             })
     commit_message = f"Auto-update {file_path.name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    commit_to_github(file_path, commit_message)
+    return commit_to_github(file_path, commit_message)
 
 def load_from_csv(file_path):
     if not file_path.exists():
@@ -360,13 +362,13 @@ def save_cache(cache):
     for domain, data in cache.items():
         if "timestamp" not in data:
             data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    save_to_csv(AUDIT_CSV, cache)
+    return save_to_csv(AUDIT_CSV, cache)
 
 def load_whois_cache():
     return load_from_csv(WHOIS_CSV)
 
 def save_whois_cache(cache):
-    save_to_csv(WHOIS_CSV, cache)
+    return save_to_csv(WHOIS_CSV, cache)
 
 def cleanup_old_cache_entries(days=CACHE_CLEANUP_DAYS):
     cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -459,6 +461,47 @@ def crawl_page(url, max_retries=2):
                 return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
             continue
     return {"url": url, "html": "", "ssl_valid": False, "status_code": None, "load_time": None, "headers": {}}
+
+def find_broken_links(crawl_result, max_links=10, timeout=5):
+    """Check up to max_links internal links on the crawled page; return broken link URLs."""
+    from urllib.parse import urljoin
+    base_url = crawl_result["url"]
+    domain = urlparse(base_url).netloc
+    try:
+        soup = BeautifulSoup(crawl_result["html"], "html.parser")
+    except Exception:
+        return []
+
+    candidates = []
+    seen = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        absolute = urljoin(base_url, href)
+        parsed = urlparse(absolute)
+        if parsed.scheme not in ("http", "https") or parsed.netloc != domain:
+            continue
+        if parsed.path.rstrip("/") in seen or (not parsed.path and parsed.netloc == domain):
+            continue
+        seen.add(parsed.path.rstrip("/"))
+        candidates.append(absolute)
+        if len(candidates) >= max_links:
+            break
+
+    broken = []
+    session = requests.Session()
+    for link in candidates:
+        try:
+            response = session.head(link, timeout=timeout, allow_redirects=True)
+            if response.status_code >= 400:
+                confirm = session.get(link, timeout=timeout, allow_redirects=True, stream=True)
+                if confirm.status_code >= 400:
+                    broken.append(link)
+                confirm.close()
+        except Exception:
+            broken.append(link)
+    return broken
 
 def check_domain_expiration(url, whois_cache):
     domain = urlparse(url).netloc
@@ -555,7 +598,7 @@ def complete_missing_audits(cache, whois_cache):
 
         language = detect_language(crawl_result["html"], crawl_result["headers"])
 
-        technical_audit_result = technical_audit(crawl_result)
+        technical_audit_result = technical_audit(crawl_result, whois_cache)
         business_audit_result = business_info_audit(crawl_result, url, language)
         functional_audit_result = functional_gaps_audit(crawl_result, url, language)
         seo_audit_result = seo_visibility_audit(crawl_result, url, language)
@@ -587,9 +630,12 @@ def complete_missing_audits(cache, whois_cache):
 # Import HTML parser for optimization
 from html_parser import CachedSoup
 
-def technical_audit(crawl_result):
+def technical_audit(crawl_result, whois_cache=None):
     if not crawl_result["html"]:
         return {"score": 0, "issues": [], "checks": {}}
+
+    if whois_cache is None:
+        whois_cache = load_whois_cache()
 
     # Use cached soup for optimization
     soup = CachedSoup(crawl_result["html"])
@@ -622,7 +668,7 @@ def technical_audit(crawl_result):
         issues.append("Missing viewport meta tag for mobile responsiveness")
 
     # Domain expiration
-    expiring_soon = check_domain_expiration(crawl_result["url"], {})
+    expiring_soon = check_domain_expiration(crawl_result["url"], whois_cache)
     expiration_status = "Good" if not expiring_soon else "Critical"
     checks["domain_expiration"] = {"status": expiration_status, "issue": "Domain expiring soon" if expiring_soon else None}
     if expiring_soon:
@@ -636,6 +682,63 @@ def technical_audit(crawl_result):
     if is_parked:
         score -= SCORE_DEDUCTIONS["parked_domain"]
         issues.append("Domain appears to be parked")
+
+    # Flash elements
+    has_flash = bool(soup.find_all(["object", "embed"])) or bool(
+        soup.find_all("a", href=lambda x: x and x.lower().endswith(".swf"))
+    ) or "application/x-shockwave-flash" in (crawl_result["html"] or "")
+    flash_status = "Good" if not has_flash else "Needs improvement"
+    checks["flash_elements"] = {"status": flash_status, "issue": None if not has_flash else "Flash content detected"}
+    if has_flash:
+        score -= SCORE_DEDUCTIONS["flash_elements"]
+        issues.append("Flash content detected (unsupported on modern browsers)")
+
+    # Outdated plugins
+    outdated_plugin_keywords = ["silverlight", "shockwave", "quicktime", "realplayer", "java applet"]
+    plugin_srcs = " ".join(
+        (el.get("type", "") or "") + " " + (el.get("src", "") or "")
+        for el in soup.find_all(["object", "embed"])
+    ).lower()
+    has_outdated_plugins = any(kw in plugin_srcs for kw in outdated_plugin_keywords)
+    plugin_status = "Good" if not has_outdated_plugins else "Needs improvement"
+    checks["outdated_plugins"] = {"status": plugin_status, "issue": None if not has_outdated_plugins else "Outdated browser plugins detected"}
+    if has_outdated_plugins:
+        score -= SCORE_DEDUCTIONS["outdated_plugins"]
+        issues.append("Outdated browser plugins (e.g., Silverlight, QuickTime) detected")
+
+    # Structured data (JSON-LD)
+    ld_scripts = [
+        script for script in soup.scripts
+        if (script.get("type") or "").lower() == "application/ld+json"
+    ]
+    has_structured_data = bool(ld_scripts)
+    structured_status = "Good" if has_structured_data else "Needs improvement"
+    checks["structured_data"] = {"status": structured_status, "issue": None if has_structured_data else "No JSON-LD structured data detected"}
+    if not has_structured_data:
+        score -= SCORE_DEDUCTIONS["missing_structured_data"]
+        issues.append("No JSON-LD structured data detected")
+
+    # Security headers
+    headers = crawl_result.get("headers") or {}
+    security_headers = ["Strict-Transport-Security", "X-Content-Type-Options", "X-Frame-Options", "Content-Security-Policy"]
+    missing_security_headers = [h for h in security_headers if h.lower() not in {k.lower() for k in headers}]
+    header_status = "Good" if not missing_security_headers else "Needs improvement"
+    checks["security_headers"] = {"status": header_status, "issue": None if not missing_security_headers else f"Missing security headers: {', '.join(missing_security_headers)}"}
+    if missing_security_headers:
+        score -= SCORE_DEDUCTIONS["missing_security_headers"]
+        issues.append(f"Missing security headers: {', '.join(missing_security_headers)}")
+
+    # Broken links (capped sample of internal links)
+    broken_links = find_broken_links(crawl_result)
+    broken_status = "Good" if not broken_links else "Needs improvement"
+    checks["broken_links"] = {
+        "status": broken_status,
+        "issue": None if not broken_links else f"{len(broken_links)} broken internal links detected",
+        "details": {"count": len(broken_links), "broken": broken_links}
+    }
+    if broken_links:
+        score -= SCORE_DEDUCTIONS["broken_links"] * min(len(broken_links), 5)
+        issues.append(f"{len(broken_links)} broken internal link(s) detected (sampled up to 10)")
 
     return {"score": max(0, score), "issues": issues, "checks": checks}
 
@@ -929,7 +1032,7 @@ def ux_audit(crawl_result, url, language='en'):
     viewport_status = "Good" if has_viewport else "Needs improvement"
     checks["mobile_viewport"] = {"status": viewport_status, "issue": None if has_viewport else "Missing viewport meta tag"}
     if not has_viewport:
-        score -= 15
+        score -= SCORE_DEDUCTIONS["mobile_unfriendly"]
         issues.append("Missing viewport meta tag for mobile responsiveness")
 
     # 2. Base Font Size
@@ -945,7 +1048,7 @@ def ux_audit(crawl_result, url, language='en'):
     font_status = "Good" if body_font_ok else "Needs improvement"
     checks["readable_font_size"] = {"status": font_status, "issue": None if body_font_ok else "Base font size is too small"}
     if not body_font_ok:
-        score -= 10
+        score -= SCORE_DEDUCTIONS["small_font_size"]
         issues.append("Base font size is too small for readability")
 
     # 3. Clear Call-to-Action Buttons
@@ -955,7 +1058,7 @@ def ux_audit(crawl_result, url, language='en'):
     cta_status = "Good" if has_clear_ctas else "Needs improvement"
     checks["clear_ctas"] = {"status": cta_status, "issue": None if has_clear_ctas else "No clear call-to-action buttons found"}
     if not has_clear_ctas:
-        score -= 10
+        score -= SCORE_DEDUCTIONS["no_clear_ctas"]
         issues.append("No clear call-to-action buttons found")
 
     # 4. Form Accessibility
@@ -970,7 +1073,7 @@ def ux_audit(crawl_result, url, language='en'):
     form_status = "Good" if accessible_forms else "Needs improvement"
     checks["form_accessibility"] = {"status": form_status, "issue": None if accessible_forms else "Forms lack proper labels"}
     if not accessible_forms:
-        score -= 10
+        score -= SCORE_DEDUCTIONS["form_accessibility"]
         issues.append("Forms lack proper labels for accessibility")
 
     # 5. Navigation Structure
@@ -980,7 +1083,7 @@ def ux_audit(crawl_result, url, language='en'):
     nav_status = "Good" if has_navigation else "Needs improvement"
     checks["navigation_structure"] = {"status": nav_status, "issue": None if has_navigation else "No clear navigation menu found"}
     if not has_navigation:
-        score -= 10
+        score -= SCORE_DEDUCTIONS["no_navigation"]
         issues.append("No clear navigation menu found")
 
     # 6. Logical Content Structure
@@ -989,7 +1092,7 @@ def ux_audit(crawl_result, url, language='en'):
     heading_status = "Good" if has_h1 and len(headings) >= 3 else "Needs improvement"
     checks["content_structure"] = {"status": heading_status, "issue": None if (has_h1 and len(headings) >= 3) else "Missing H1 heading or poor hierarchy"}
     if not has_h1 or len(headings) < 3:
-        score -= 10
+        score -= SCORE_DEDUCTIONS["poor_heading_structure"]
         issues.append("Missing H1 heading or poor heading hierarchy")
 
     # 7. Image Accessibility
@@ -998,7 +1101,7 @@ def ux_audit(crawl_result, url, language='en'):
     alt_status = "Good" if not images or len(images_with_alt) == len(images) else "Needs improvement"
     checks["image_accessibility"] = {"status": alt_status, "issue": f"{len(images) - len(images_with_alt)} images missing alt text" if images and len(images_with_alt) < len(images) else None}
     if images and len(images_with_alt) < len(images):
-        score -= 5 * min(len(images) - len(images_with_alt), 5)
+        score -= SCORE_DEDUCTIONS["missing_alt_text"] * min(len(images) - len(images_with_alt), 5)
         issues.append(f"{len(images) - len(images_with_alt)} images missing alt text")
 
     return {"score": max(0, score), "issues": issues, "checks": checks}
@@ -1097,7 +1200,7 @@ def get_competitor_benchmarks(url, industry_keyword, cache, whois_cache):
         for url, crawl_result in competitor_results.items():
             if crawl_result["html"]:
                 language = detect_language(crawl_result["html"], crawl_result["headers"])
-                tech_audit = technical_audit(crawl_result)
+                tech_audit = technical_audit(crawl_result, whois_cache)
                 business_audit = business_info_audit(crawl_result, url, language)
                 functional_audit = functional_gaps_audit(crawl_result, url, language)
                 seo_audit_result = seo_visibility_audit(crawl_result, url, language)
@@ -1161,7 +1264,7 @@ def process_batch(urls, cache, whois_cache, industry_keyword, progress_bar, stat
         language = detect_language(crawl_result["html"], crawl_result["headers"])
 
         # Run all audits
-        technical_audit_result = technical_audit(crawl_result)
+        technical_audit_result = technical_audit(crawl_result, whois_cache)
         business_audit_result = business_info_audit(crawl_result, url, language)
         functional_audit_result = functional_gaps_audit(crawl_result, url, language)
         seo_audit_result = seo_visibility_audit(crawl_result, url, language)
@@ -1292,8 +1395,10 @@ def main():
                     progress_bar, status_text, batch_num, total_batches, benchmark_websites
                 )
                 all_results.extend(batch_results)
-                save_cache(cache)
-                save_whois_cache(whois_cache)
+                if not save_cache(cache):
+                    st.error("Failed to save audit results to the shared store (GitHub commit failed). Results shown below may not appear in the dashboard.")
+                if not save_whois_cache(whois_cache):
+                    st.warning("Failed to save WHOIS cache to the shared store.")
                 time.sleep(1)
 
             progress_bar.empty()

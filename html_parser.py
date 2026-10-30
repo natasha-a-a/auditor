@@ -54,9 +54,9 @@ class CachedSoup:
         
         for form in forms:
             form_text = form.get_text().lower()
-            form_id = form.get("id", "").lower()
-            form_class = form.get("class", "").lower()
-            form_action = form.get("action", "").lower()
+            form_id = (form.get("id") or "").lower()
+            form_class = " ".join(form.get("class") or []).lower()
+            form_action = (form.get("action") or "").lower()
             
             # Check if form contains contact-related elements
             inputs = form.find_all("input")
