@@ -3,7 +3,6 @@ ssl_invalid,30
 slow_load_time,10
 mobile_unfriendly,10
 flash_elements,15
-broken_links,5
 outdated_plugins,10
 missing_structured_data,5
 missing_security_headers,10
@@ -31,3 +30,8 @@ diy_website,10
 no_updates,10
 domain_expiring,25
 parked_domain,30
+small_font_size,10
+no_clear_ctas,10
+form_accessibility,10
+no_navigation,10
+poor_heading_structure,10
